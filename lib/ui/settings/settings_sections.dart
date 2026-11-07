@@ -25,8 +25,8 @@ import 'storage_view.dart';
 enum SettingsGroup {
   appearance('外观', Icons.palette_outlined),
   playback('播放', Icons.play_arrow_rounded),
-  download('下载', Icons.download_rounded),
   sources('站源', Icons.dns_outlined),
+  download('下载', Icons.download_rounded),
   proxy('代理', Icons.language_rounded),
   users('用户', Icons.manage_accounts_outlined),
   about('关于', Icons.info_outline_rounded),
