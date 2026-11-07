@@ -260,11 +260,11 @@ func (d *Downloader) resolveProviderMedia(ctx context.Context, task Task) (provi
 			media.Referer = client.host + "/home"
 		}
 	}
-	// 页面兜底只补「还没有地址」的情况。黄果 AI 的地址已经由上面的
-	// /api/videos/{id}/play 拿到，不能再用详情页解析结果覆盖——新站详情页
-	// 是前端渲染的空壳，解析出来是空串，会把刚取到的 m3u8 清掉，
-	// 表现就是封面/目录都正常、一点播放就报「未返回有效播放地址」。
-	if chapter.PageURL != "" && (chapter.Source == sourceHuangguoAI || chapter.Source == sourceHuangguoVideo) && !isProviderHTTPMediaURL(media.URL) {
+	// 页面兜底只对「黄果视频」这种地址内嵌在页面里的源生效。黄果 AI 的地址
+	// 由上面的 /api/videos/{id}/play 直接给出，上游 106 也是这么分工的：AI 绝不
+	// 走详情页解析（新站详情页是前端渲染的空壳，解析结果为空，会把刚取到的
+	// m3u8 清掉，表现就是封面/目录正常、一点播放就报「未返回有效播放地址」）。
+	if chapter.PageURL != "" && chapter.Source == sourceHuangguoVideo {
 		responses := &playbackResponseURLs{}
 		pageContext := context.WithValue(ctx, playbackResponseURLsKey{}, responses)
 		body, err := d.fetchProviderText(pageContext, chapter.PageURL, media.Referer)
@@ -275,11 +275,7 @@ func (d *Downloader) resolveProviderMedia(ctx context.Context, task Task) (provi
 		if actual, ok := responses.values.Load(chapter.PageURL); ok {
 			pageURL = actual.(string)
 		}
-		if chapter.Source == sourceHuangguoAI {
-			media.URL = parseAIVideoURL(body, pageURL)
-		} else {
-			media.URL = parseDataHLS(body, pageURL)
-		}
+		media.URL = parseDataHLS(body, pageURL)
 		media.Referer = pageURL
 	}
 	if !isProviderHTTPMediaURL(media.URL) {
