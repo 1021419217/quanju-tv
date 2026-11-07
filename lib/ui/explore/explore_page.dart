@@ -34,6 +34,10 @@ class ExplorePageState extends State<ExplorePage>
   final _search = TextEditingController();
   final _tabsKey = GlobalKey();
   String _shown = '';
+
+  /// 每个分类（source|tab）各自记住滚动位置，切走再切回来时回到原处。
+  final Map<String, double> _offsets = {};
+  double? _restoreTarget;
   String? _swipeHint;
   Timer? _hintTimer;
 
@@ -64,6 +68,7 @@ class ExplorePageState extends State<ExplorePage>
   }
 
   Future<void> refresh() async {
+    _restoreTarget = null;
     if (_scroll.hasClients) _scroll.jumpTo(0);
     await _explore?.refresh();
   }
@@ -203,9 +208,35 @@ class ExplorePageState extends State<ExplorePage>
   void _resetScroll(ExploreFeed explore) {
     final shown = '${explore.source?.id}|${explore.tab.id}';
     if (shown == _shown) return;
+    final previous = _shown;
     _shown = shown;
+    // 离开旧分类时先把它滑到的位置存起来，切回来再还原；
+    // 从没去过的分类仍然从顶部开始。
+    if (previous.isNotEmpty && _scroll.hasClients) {
+      _offsets[previous] = _scroll.offset;
+    }
+    _restoreTarget = _offsets[shown] ?? 0;
+  }
+
+  /// 等新分类的内容就绪后，把滚动位置还原到上次离开的地方。
+  /// 内容还在加载时先不跳，等下一次重建（列表填好后）再恢复。
+  void _applyRestore(ExploreFeed explore) {
+    final target = _restoreTarget;
+    if (target == null) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scroll.hasClients) _scroll.jumpTo(0);
+      if (!mounted || _restoreTarget != target || !_scroll.hasClients) return;
+      final max = _scroll.position.maxScrollExtent;
+      if (target == 0) {
+        _scroll.jumpTo(0);
+        _restoreTarget = null;
+        return;
+      }
+      final feed = explore.feed;
+      final ready = feed != null && (feed.items.isNotEmpty || !feed.loading);
+      if (ready || max >= target) {
+        _scroll.jumpTo(target.clamp(0.0, max));
+        _restoreTarget = null;
+      }
     });
   }
 
@@ -219,6 +250,7 @@ class ExplorePageState extends State<ExplorePage>
       final television = form == FormFactor.television;
       final desktop = form == FormFactor.window;
       _resetScroll(explore);
+      _applyRestore(explore);
       if (source == null) {
         return Scaffold(
           body: SafeArea(

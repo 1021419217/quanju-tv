@@ -257,8 +257,8 @@ class _AppShellState extends State<AppShell>
                         for (final tab in AppTab.values)
                           NavigationDestination(
                             key: ValueKey('nav-${tab.name}'),
-                            icon: _badged(tab, Icon(tab.icon)),
-                            selectedIcon: _badged(tab, Icon(tab.selectedIcon)),
+                            icon: _navIcon(tab, tab.icon),
+                            selectedIcon: _navIcon(tab, tab.selectedIcon),
                             label: tab.label,
                           ),
                       ],
@@ -314,6 +314,23 @@ class _AppShellState extends State<AppShell>
   Widget _badged(AppTab tab, Widget icon) => tab == AppTab.settings
       ? _DownloadBadge(downloads: _downloads!, child: icon)
       : icon;
+
+  /// 底部「发现」图标支持长按刷新当前分类，其余 tab 维持原样。
+  Widget _navIcon(AppTab tab, IconData icon) {
+    final child = _badged(tab, Icon(icon));
+    if (tab != AppTab.explore) return child;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onLongPress: _refreshExplore,
+      child: child,
+    );
+  }
+
+  void _refreshExplore() {
+    unawaited(HapticFeedback.mediumImpact());
+    final state = _explore.currentState;
+    if (state != null) unawaited(state.refresh());
+  }
 
   Widget _televisionHeader() {
     final tabs = Row(

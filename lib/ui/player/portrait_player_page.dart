@@ -26,7 +26,8 @@ const _maskHeight = 68.0;
 
 /// 左侧亮度区的右边界（占播放区宽度），和横屏播放器的左半屏一致。
 ///
-/// 最左侧五分之一仍然是「长按 2 倍速」，亮度从五分之一到一半之间生效。
+/// 长按画面任意处（左侧亮度区除外）为「临时倍速，松手恢复、下滑锁定」，
+/// 亮度从五分之一到一半之间生效；播放设置改由底部「设置」选项卡打开。
 const _brightnessZone = .5;
 
 String _status(Drama drama) =>
@@ -205,25 +206,22 @@ class _PortraitPlayerPageState extends State<PortraitPlayerPage>
 
   void _pressStart(LongPressStartDetails details, double width) {
     final x = details.localPosition.dx;
-    if (x < width / 5) {
-      // 最左侧：沿用「长按临时 2 倍速、下滑松手锁定」。
-      if (!_session.boostLocked) _session.holdBoost();
-      unawaited(HapticFeedback.selectionClick());
-      setState(() {
-        _holding = true;
-        _heldIndex = _session.index;
-        _overMask = false;
-      });
-    } else if (x < width * _brightnessZone && AppDevice.brightnessSupported) {
+    if (x >= width / 5 && x < width * _brightnessZone && AppDevice.brightnessSupported) {
       // 左侧亮度区：长按后上下滑调亮度、左右滑快进快退；
       // 短促的上下滑仍然是翻页切集，因为这里不抢手势、只等长按成立。
-      // 非 Android 没有窗口亮度能力，这里退回原来的「打开播放设置」。
       _gestures.hold();
       unawaited(HapticFeedback.selectionClick());
-    } else {
-      unawaited(HapticFeedback.selectionClick());
-      unawaited(_openSettings());
+      return;
     }
+    // 其余区域（含最左侧）：长按即临时倍速，松手恢复，下滑锁定倍速档位。
+    // 播放设置不再从长按进入，改由底部「设置」选项卡按钮打开。
+    if (!_session.boostLocked) _session.holdBoost();
+    unawaited(HapticFeedback.selectionClick());
+    setState(() {
+      _holding = true;
+      _heldIndex = _session.index;
+      _overMask = false;
+    });
   }
 
   void _pressMove(LongPressMoveUpdateDetails details) {
@@ -717,51 +715,82 @@ class _PortraitPlayerPageState extends State<PortraitPlayerPage>
     final drama = _session.detail.drama;
     final count = _session.detail.episodes.length;
     final status = _status(drama);
-    return Material(
-      color: Colors.white.withValues(alpha: .14),
-      borderRadius: BorderRadius.circular(12),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: _openEpisodes,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(14, 0, 12, 0),
-          child: Row(
-            spacing: 8,
-            children: [
-              const Icon(
-                Icons.view_list_rounded,
-                size: 18,
-                color: Colors.white,
-              ),
-              const Text(
-                '选集',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Expanded(
+          child: Material(
+            color: Colors.white.withValues(alpha: .14),
+            borderRadius: BorderRadius.circular(12),
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              onTap: _openEpisodes,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(14, 0, 12, 0),
+                child: Row(
+                  spacing: 8,
+                  children: [
+                    const Icon(
+                      Icons.view_list_rounded,
+                      size: 18,
+                      color: Colors.white,
+                    ),
+                    const Text(
+                      '选集',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    Expanded(
+                      child: Text(
+                        '· $status共 $count 集',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: .72),
+                          fontSize: 14,
+                        ),
+                      ),
+                    ),
+                    const Icon(
+                      Icons.keyboard_arrow_up_rounded,
+                      size: 20,
+                      color: Colors.white,
+                    ),
+                  ],
                 ),
               ),
-              Expanded(
-                child: Text(
-                  '· $status共 $count 集',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: Colors.white.withValues(alpha: .72),
-                    fontSize: 14,
-                  ),
-                ),
-              ),
-              const Icon(
-                Icons.keyboard_arrow_up_rounded,
-                size: 20,
-                color: Colors.white,
-              ),
-            ],
+            ),
           ),
         ),
-      ),
+        const SizedBox(width: 8),
+        // 「设置」选项卡：原来长按画面弹出的播放设置挪到这里。
+        Material(
+          color: Colors.white.withValues(alpha: .14),
+          borderRadius: BorderRadius.circular(12),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: _openSettings,
+            child: const SizedBox(
+              width: 54,
+              child: Center(
+                child: Icon(Icons.tune_rounded, size: 20, color: Colors.white),
+              ),
+            ),
+          ),
+        ),
+      ],
     );
+  }
+
+  String get _boostLabel {
+    final speed = _session.boostSpeed;
+    final text = speed == speed.roundToDouble()
+        ? speed.toStringAsFixed(0)
+        : speed.toStringAsFixed(1);
+    return '$text 倍速播放中';
   }
 
   Widget _boostBadge() => Container(
@@ -771,14 +800,14 @@ class _PortraitPlayerPageState extends State<PortraitPlayerPage>
       color: Colors.black.withValues(alpha: .5),
       borderRadius: BorderRadius.circular(16),
     ),
-    child: const Row(
+    child: Row(
       mainAxisSize: MainAxisSize.min,
       spacing: 6,
       children: [
-        Icon(Icons.fast_forward_rounded, size: 16, color: Colors.white),
+        const Icon(Icons.fast_forward_rounded, size: 16, color: Colors.white),
         Text(
-          '2 倍速播放中',
-          style: TextStyle(
+          _boostLabel,
+          style: const TextStyle(
             color: Colors.white,
             fontSize: 14,
             fontWeight: FontWeight.w600,
