@@ -81,11 +81,11 @@ func providerSourceForURL(raw string) string {
 	}
 	host := strings.ToLower(parsed.Hostname())
 	switch {
-	case host == "huangguoai.com" || strings.HasSuffix(host, ".ediayikma.cc") || strings.HasSuffix(host, ".agdkczeyx.cc"):
+	case isHuangguoAIHost(host):
 		return sourceHuangguoAI
 	case host == "huangguo.video":
 		return sourceHuangguoVideo
-	case host == "tideember.cc" || host == "xqjurgek.top":
+	case host == "tideember.cc" || host == "xqjurgek.top" || isHuangdouHost(host):
 		return sourceHuangdou
 	case host == "hongguoduanju.com" || host == "www.hongguoduanju.com":
 		return sourceHongguo
@@ -230,6 +230,21 @@ func (d *Downloader) resolveProviderMedia(ctx context.Context, task Task) (provi
 		}
 	}
 	media := providerMedia{URL: chapter.VideoURL, Referer: firstNonEmpty(chapter.Referer, d.providerBaseURL(chapter.Source)+"/")}
+	// 黄果改版后播放地址不再内嵌在详情页里，必须单独调
+	// /api/videos/{id}/play?ep=N 取 m3u8。章节的 VideoURL 是空的，落到下面
+	// 通用兜底只会报「未返回有效播放地址」。
+	if chapter.Source == sourceHuangguoAI {
+		_, sourceID, valid := splitProviderDramaID(task.DramaID)
+		if !valid || sourceID == "" {
+			return providerMedia{}, fmt.Errorf("黄果剧集信息无效")
+		}
+		address, err := d.fetchHuangguoAIPlayURL(ctx, sourceID, chapterEpisodeNumber(chapter, task.Index))
+		if err != nil {
+			return providerMedia{}, err
+		}
+		media.URL = address
+		media.Referer = d.providerBaseURL(sourceHuangguoAI) + "/"
+	}
 	if chapter.Source == sourceHuangdou {
 		_, sourceID, valid := splitProviderDramaID(task.DramaID)
 		if valid {

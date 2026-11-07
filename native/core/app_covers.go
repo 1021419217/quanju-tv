@@ -112,7 +112,7 @@ func nativeCoverReferer(downloader *Downloader, source, address string) string {
 		}
 	}
 	if source == sourceHuangdou {
-		if parsed, err := url.Parse(address); err == nil && (strings.EqualFold(parsed.Hostname(), "tideember.cc") || strings.EqualFold(parsed.Hostname(), "xqjurgek.top")) {
+		if parsed, err := url.Parse(address); err == nil && (strings.EqualFold(parsed.Hostname(), "tideember.cc") || strings.EqualFold(parsed.Hostname(), "xqjurgek.top") || isHuangdouHost(parsed.Hostname())) {
 			return parsed.Scheme + "://" + parsed.Host + "/home"
 		}
 		downloader.providerMu.Lock()

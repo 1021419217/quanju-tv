@@ -1101,7 +1101,7 @@ func oneSearch(slot, kw string) ([]interface{}, error) {
 
 // ---- resolve ----
 
-var oneProbeClient = &http.Client{Timeout: 8 * time.Second}
+var oneProbeClient = &http.Client{Timeout: 8 * time.Second, Transport: sharedTransport}
 
 // oneProbeMedia ports py _probe_media: HEAD, then Range, over the
 // first 3 candidate domains; falls back to the first candidate.
@@ -1214,7 +1214,7 @@ func oneResolve(slot, rawID string) (map[string]interface{}, error) {
 
 // ---- cover fetch: image-domain rotation + AES decrypt (py localProxy) ----
 
-var oneImgClient = &http.Client{Timeout: 20 * time.Second}
+var oneImgClient = &http.Client{Timeout: 20 * time.Second, Transport: sharedTransport}
 
 func oneImageMagic(b []byte) bool {
 	if len(b) >= 3 && b[0] == 0xFF && b[1] == 0xD8 && b[2] == 0xFF {

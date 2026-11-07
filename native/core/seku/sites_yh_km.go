@@ -88,7 +88,7 @@ func yhKMCandidates() []string {
 		out = append(out, "http://"+ip+":8099")
 	}
 	req, _ := http.NewRequest("GET", "http://119.28.28.28/d?dn=api.cheetah888.com", nil)
-	if resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req); err == nil {
+	if resp, err := (&http.Client{Timeout: 10 * time.Second, Transport: sharedTransport}).Do(req); err == nil {
 		b, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		for _, p := range strings.FieldsFunc(string(b), func(r rune) bool { return r == ';' || r == ',' || r == '\n' || r == ' ' }) {

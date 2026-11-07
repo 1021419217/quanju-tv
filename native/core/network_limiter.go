@@ -12,9 +12,16 @@ import (
 )
 
 type requestGate struct {
-	busy      bool
+	active    int
 	lastStart time.Time
 }
+
+// 同一站源（host 或 host#lane）允许同时「在飞」的请求数。
+// 之前是 1：一个源的多张海报、目录页和详情页被排成一条队，每 250ms 才放行
+// 一个，首屏表现就是「一张一张往外蹦、偶尔卡住」。放到 2 依然远低于源站
+// 容忍阈值（配合 150ms 启动间隔，稳态上限约 13 次/秒），但把同源串行等待
+// 砍掉近一半；触发 429 / Cloudflare 验证时仍有退避兜底。
+const requestGateConcurrency = 2
 
 type requestBackoff struct {
 	host   string
@@ -155,8 +162,8 @@ func (limiter *requestLimiter) acquire(ctx context.Context, request *http.Reques
 			}
 		}
 		lowPriorityReady := !background || limiter.foregroundWaiting == 0 && limiter.active == 0
-		if lowPriorityReady && !gate.busy && limiter.active < limiter.concurrency && delay <= 0 {
-			gate.busy = true
+		if lowPriorityReady && gate.active < requestGateConcurrency && limiter.active < limiter.concurrency && delay <= 0 {
+			gate.active++
 			gate.lastStart = time.Now()
 			limiter.active++
 			limiter.mu.Unlock()
@@ -184,7 +191,7 @@ func (limiter *requestLimiter) acquire(ctx context.Context, request *http.Reques
 		once.Do(func() {
 			limiter.mu.Lock()
 			limiter.active--
-			gate.busy = false
+			gate.active--
 			if !background {
 				limiter.lastForeground = time.Now()
 			}

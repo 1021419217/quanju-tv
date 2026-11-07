@@ -43,7 +43,7 @@ var hjwState = struct {
 	host string
 }{}
 
-var hjwClient = &http.Client{Timeout: 25 * time.Second}
+var hjwClient = &http.Client{Timeout: 25 * time.Second, Transport: sharedTransport}
 
 type hjwCat struct{ id, name string }
 

@@ -1,6 +1,7 @@
 package core
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 
@@ -46,8 +47,13 @@ const (
 )
 
 var (
-	huangguoAIBaseURL     = "https://huangguoai.com"
-	huangguoAIBaseMirrors = []string{"https://huangguoai.com", "https://ttvoij.ediayikma.cc", "https://thu.ediayikma.cc", "https://pku.ediayikma.cc", "https://fdu.ediayikma.cc", "https://thu.agdkczeyx.cc"}
+	// 黄果改版后主站是 *.gitiecgad.cc（旧 huangguoai.com 域已停解析）。
+	huangguoAIBaseURL     = "https://26d.gitiecgad.cc"
+	// 黄果短剧的域名整组换过：原来的 huangguoai.com / *.ediayikma.cc 已经
+	// 全部失效（实测 8 秒无响应），新站是 *.gitiecgad.cc。旧域名一条都不能
+	// 留在前面——每撞一个就是 8 秒空等，首页直接卡住。因此只把实测可用的
+	// 放前面，huangguoai.com 沉到末尾当长期兜底（万一哪天复活）。
+	huangguoAIBaseMirrors = []string{"https://26d.gitiecgad.cc", "https://thu.agdkczeyx.cc", "https://huangguoai.com"}
 	huangguoVideoBaseURL  = "https://huangguo.video"
 
 	huangguoAISlugs     = []string{"recommend", "newest", "ai-duanju", "ai-manju", "ai-huanlian", "ai-mogai", "ranks/hot"}
@@ -123,6 +129,11 @@ func isHuangguoProviderSource(source string) bool {
 
 func canonicalProviderSource(source string) string {
 	key := strings.ToLower(strings.TrimSpace(source))
+	// 黄豆的域名会轮换（ferncider.cc 起共 6 个），按域名归属判断，
+	// 免得新域名被当成未知源，切详情/取流时报「当前版本不包含此站源」。
+	if isHuangdouHost(key) {
+		return sourceHuangdou
+	}
 	switch key {
 	case "huangguo", "huangguoai", "huangguoai.com":
 		return sourceHuangguoAI
@@ -308,48 +319,9 @@ func (d *Downloader) fetchHuangguoAIChapters(ctx context.Context, sourceID strin
 	return drama.DisplayTitle(), chapters, err
 }
 
-func (d *Downloader) fetchHuangguoAIDetail(ctx context.Context, sourceID string) (Drama, []Chapter, error) {
-	sourceID = strings.Trim(strings.TrimSpace(sourceID), "/")
-	sourceID = strings.TrimPrefix(sourceID, "detail/")
-	if sourceID == "" {
-		return Drama{}, nil, fmt.Errorf("empty huangguoai sourceID")
-	}
-	detailURL := strings.TrimRight(huangguoAIBaseURL, "/") + "/detail/" + url.PathEscape(sourceID) + "/"
-	body, err := d.fetchProviderText(ctx, detailURL, huangguoAIBaseURL+"/")
-	if err != nil {
-		return Drama{}, nil, err
-	}
-	drama := huangguoDetailMetadata(body, detailURL, sourceHuangguoAI, sourceID)
-	title := drama.DisplayTitle()
-	episodes := parseHuangguoAIEpisodes(body, detailURL, sourceID)
-	if len(episodes) == 0 {
-		if media := parseAIVideoURL(body, detailURL); media != "" {
-			episodes = []providerEpisode{{Key: "1", Title: title, URL: detailURL, Index: 1, HLS: media}}
-		}
-	}
-	if len(episodes) == 0 {
-		return drama, nil, nil
-	}
-	var chapters []Chapter
-	for _, ep := range episodes {
-		mediaURL := ep.HLS
-		idx := ep.Index
-		if idx <= 0 {
-			idx = len(chapters) + 1
-		}
-		chapterTitle := strings.TrimSpace(ep.Title)
-		if chapterTitle == "" {
-			chapterTitle = fmt.Sprintf("第%d集", idx)
-		}
-		key := ep.Key
-		if key == "" {
-			key = strconv.Itoa(idx)
-		}
-		chapters = append(chapters, Chapter{ID: providerChapterID(sourceHuangguoAI, sourceID, key), Source: sourceHuangguoAI, Title: chapterTitle, VideoURL: mediaURL, PageURL: ep.URL, CurrentEpisode: rawEpisode(idx)})
-	}
-	sortProviderChapters(chapters)
-	return drama, uniqueChapters(chapters), nil
-}
+// 黄果 AI 的详情与取流已改为新站（*.gitiecgad.cc）的 JSON 接口：
+// 旧的 /detail/{id}/ HTML 解析在新站上必然 404，实现已迁到 provider_huangguo_api.go
+// 的 fetchHuangguoAIDetail / fetchHuangguoAIPlayURL。
 
 func (d *Downloader) fetchHuangguoVideoChapters(ctx context.Context, sourceID string) (string, []Chapter, error) {
 	drama, chapters, err := d.fetchHuangguoVideoDetail(ctx, sourceID)
@@ -407,6 +379,13 @@ func (d *Downloader) fetchHuangguoVideoDetail(ctx context.Context, sourceID stri
 }
 
 func (d *Downloader) fetchProviderText(ctx context.Context, rawURL, referer string) (string, error) {
+	return d.fetchProviderRequest(ctx, rawURL, referer, nil)
+}
+
+// fetchProviderRequest 是 fetchProviderText 的带请求体版本：payload 非空时按
+// POST + application/json 发送。黄果改版后新站只认 /api/edge/request 这种
+// POST 信封（body 里再描述要转发的 GET 路径），纯 GET 拿不到数据。
+func (d *Downloader) fetchProviderRequest(ctx context.Context, rawURL, referer string, payload []byte) (string, error) {
 	retries := d.cfg.Retries
 	if retries <= 0 {
 		retries = 3
@@ -438,9 +417,17 @@ func (d *Downloader) fetchProviderText(ctx context.Context, rawURL, referer stri
 			if len(candidates) > 1 {
 				timeout = 5 * time.Second
 			}
-			req, err := http.NewRequestWithContext(ctx, http.MethodGet, candidate, nil)
+			method, requestBody := http.MethodGet, io.Reader(nil)
+			if payload != nil {
+				method, requestBody = http.MethodPost, bytes.NewReader(payload)
+			}
+			req, err := http.NewRequestWithContext(ctx, method, candidate, requestBody)
 			if err != nil {
 				return "", err
+			}
+			if payload != nil {
+				req.Header.Set("Content-Type", "application/json")
+				req.Header.Set("Accept", "application/json")
 			}
 			req.Header.Set("User-Agent", userAgent)
 			if agent, ok := ctx.Value(providerTextUserAgentKey{}).(string); ok && agent != "" {
@@ -517,9 +504,26 @@ func (d *Downloader) fetchProviderText(ctx context.Context, rawURL, referer stri
 	return "", lastErr
 }
 
+// isHuangguoAIHost 判断 host 是否属于黄果短剧站（含历代镜像域名）。
+// 黄果的域名换得很勤：huangguoai.com → *.ediayikma.cc → *.agdkczeyx.cc →
+// *.gitiecgad.cc。历代域名都保留识别，这样数据库里存量的旧地址仍然能被
+// 重写成当前可用镜像，而不是被当成未知来源丢掉。
+func isHuangguoAIHost(host string) bool {
+	host = strings.ToLower(strings.TrimSpace(host))
+	if host == "huangguoai.com" || host == "huangguoai.io" {
+		return true
+	}
+	for _, suffix := range []string{".ediayikma.cc", ".agdkczeyx.cc", ".gitiecgad.cc", ".lbvrhyir.cc", ".xxbgwypx.cc"} {
+		if strings.HasSuffix(host, suffix) {
+			return true
+		}
+	}
+	return false
+}
+
 func providerURLCandidates(rawURL string) []string {
 	u, err := url.Parse(rawURL)
-	if err != nil || u.Hostname() != "huangguoai.com" {
+	if err != nil || !isHuangguoAIHost(u.Hostname()) {
 		return []string{rawURL}
 	}
 	out := make([]string, 0, len(huangguoAIBaseMirrors)+8)
@@ -576,7 +580,7 @@ func generatedHuangguoAIMirrors(seed string, n int) []string {
 			continue
 		}
 		seen[sub] = true
-		out = append(out, "https://"+sub+".ediayikma.cc")
+		out = append(out, "https://"+sub+".gitiecgad.cc")
 	}
 	return out
 }

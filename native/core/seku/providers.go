@@ -3,6 +3,7 @@ package seku
 import (
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -10,10 +11,30 @@ import (
 	"time"
 )
 
-var httpClient = &http.Client{Timeout: 20 * time.Second}
+// sharedTransport 是 seku 引擎所有请求共用的连接池。
+// Go 默认 Transport 的 MaxIdleConnsPerHost 只有 2：一个源站首屏要同时取
+// 十几张海报/封面，超出的连接用完即关，下一张又要重新 DNS+TLS 握手，
+// 表现就是「海报一张一张慢慢冒」「切分类要等一两秒」。这里放宽到 16 条并
+// 延长空闲保持时间，让同一站源的突发请求真正复用已建立的连接。
+var sharedTransport = &http.Transport{
+	Proxy: http.ProxyFromEnvironment,
+	DialContext: (&net.Dialer{
+		Timeout:   10 * time.Second,
+		KeepAlive: 30 * time.Second,
+	}).DialContext,
+	ForceAttemptHTTP2:     true,
+	MaxIdleConns:          256,
+	MaxIdleConnsPerHost:   16,
+	IdleConnTimeout:       90 * time.Second,
+	TLSHandshakeTimeout:   10 * time.Second,
+	ExpectContinueTimeout: 1 * time.Second,
+}
+
+var httpClient = &http.Client{Timeout: 20 * time.Second, Transport: sharedTransport}
 
 var noRedirectClient = &http.Client{
-	Timeout: 20 * time.Second,
+	Timeout:   20 * time.Second,
+	Transport: sharedTransport,
 	CheckRedirect: func(req *http.Request, via []*http.Request) error {
 		return http.ErrUseLastResponse
 	},
@@ -36,7 +57,7 @@ func httpGetTimeout(url string, headers map[string]string, timeout time.Duration
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
-	cl := &http.Client{Timeout: timeout}
+	cl := &http.Client{Timeout: timeout, Transport: sharedTransport}
 	resp, err := cl.Do(req)
 	if err != nil {
 		if b, code, hdr, jerr, ok := jinaFallback(url, headers, nil, 0, err); ok {
@@ -172,7 +193,7 @@ func jinaFallback(rawurl string, headers map[string]string, body []byte, code in
 	for k, v := range h {
 		req.Header.Set(k, v)
 	}
-	cl := &http.Client{Timeout: 30 * time.Second}
+	cl := &http.Client{Timeout: 30 * time.Second, Transport: sharedTransport}
 	resp, err := cl.Do(req)
 	if err != nil {
 		jinaNegMu.Lock()

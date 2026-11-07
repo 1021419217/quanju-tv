@@ -96,7 +96,7 @@ func yhMMDiscover() []string {
 	out := []string{}
 	req, err := http.NewRequest("GET", "http://119.28.28.28/d?dn=cdn.newmm-tengxunyun.com", nil)
 	if err == nil {
-		resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
+		resp, err := (&http.Client{Timeout: 10 * time.Second, Transport: sharedTransport}).Do(req)
 		if err == nil {
 			b, _ := io.ReadAll(resp.Body)
 			resp.Body.Close()

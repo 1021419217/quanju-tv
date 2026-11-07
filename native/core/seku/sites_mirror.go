@@ -49,7 +49,7 @@ var mirrorState = &struct {
 	cache map[string]whosPageEntry
 }{host: mirrorSeedHost, cache: map[string]whosPageEntry{}}
 
-var mirrorClient = &http.Client{Timeout: 25 * time.Second}
+var mirrorClient = &http.Client{Timeout: 25 * time.Second, Transport: sharedTransport}
 
 func mirrorHeaders() map[string]string {
 	return map[string]string{

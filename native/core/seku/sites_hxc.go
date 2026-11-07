@@ -49,7 +49,7 @@ var hxcState = struct {
 	catsAt   time.Time
 }{}
 
-var hxcClient = &http.Client{Timeout: 25 * time.Second}
+var hxcClient = &http.Client{Timeout: 25 * time.Second, Transport: sharedTransport}
 
 func hxcEnc(plain string) string {
 	block, err := aes.NewCipher(hxcKey)

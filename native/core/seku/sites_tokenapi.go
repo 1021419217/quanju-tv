@@ -66,7 +66,7 @@ func tokenAPIStateFor(slot string) *tokenAPIState {
 	return st
 }
 
-var tokenAPIClient = &http.Client{Timeout: 25 * time.Second}
+var tokenAPIClient = &http.Client{Timeout: 25 * time.Second, Transport: sharedTransport}
 
 const tokenAPIUA = "Mozilla/5.0 (Linux; Android 13; SM-G991B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
 

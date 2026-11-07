@@ -165,8 +165,8 @@ var (
 	// Signed calls use a dedicated client (60s: this sandbox's proxy is
 	// slow; devices are fast). Signed URLs must never go through the
 	// shared jina relay, so httpDo/httpGet are deliberately NOT used.
-	yhCucumberClient      = &http.Client{Timeout: 60 * time.Second}
-	yhCucumberCoverClient = &http.Client{Timeout: 30 * time.Second}
+	yhCucumberClient      = &http.Client{Timeout: 60 * time.Second, Transport: sharedTransport}
+	yhCucumberCoverClient = &http.Client{Timeout: 30 * time.Second, Transport: sharedTransport}
 )
 
 type yhCucumberChan struct {

@@ -484,7 +484,7 @@ func zkShieldRawGet(rawurl string, headers map[string]string, referer string, ti
 	if referer != "" {
 		req.Header.Set("Referer", referer)
 	}
-	cl := &http.Client{Timeout: time.Duration(timeoutMs) * time.Millisecond}
+	cl := &http.Client{Timeout: time.Duration(timeoutMs) * time.Millisecond, Transport: sharedTransport}
 	resp, err := cl.Do(req)
 	if err != nil {
 		return ""

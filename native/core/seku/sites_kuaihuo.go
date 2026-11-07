@@ -58,7 +58,7 @@ var khState = &struct {
 	host string
 }{host: khSeedHost}
 
-var khClient = &http.Client{Timeout: 25 * time.Second}
+var khClient = &http.Client{Timeout: 25 * time.Second, Transport: sharedTransport}
 
 func khHeaders() map[string]string {
 	return map[string]string{

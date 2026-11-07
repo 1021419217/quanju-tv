@@ -597,7 +597,7 @@ func (s *g5SetangState) sessionClient() *http.Client {
 	if s.client == nil {
 		jar, _ := cookiejar.New(nil)
 		s.jar = jar
-		s.client = &http.Client{Timeout: 25 * time.Second, Jar: jar}
+		s.client = &http.Client{Timeout: 25 * time.Second, Jar: jar, Transport: sharedTransport}
 	}
 	return s.client
 }

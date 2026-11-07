@@ -300,7 +300,7 @@ func newNativeEngine(directory string) (*nativeEngine, error) {
 	cfg.dataDir = directory
 	router := &proxyRouter{}
 	d := &Downloader{cfg: cfg, providerHosts: map[string]string{}, proxyRouter: router,
-		limiter: newRequestLimiter(3, 250*time.Millisecond), diagnostics: newDiagnosticLog(directory)}
+		limiter: newRequestLimiter(6, 150*time.Millisecond), diagnostics: newDiagnosticLog(directory)}
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	// RootCAs 设为「系统信任库 + 打包 CA 全集」。通过 dart:ffi / JNI 嵌入时 Go 的
 	// crypto/tls 不会加载系统信任库，x509.SystemCertPool() 在 Android 端返回空池，
@@ -308,8 +308,14 @@ func newNativeEngine(directory string) (*nativeEngine, error) {
 	// "tls: failed to verify certificate: x509: certificate signed by unknown
 	// authority"。打包 CA 在此提供信任锚；其余平台只是多追加一份，行为不变。
 	transport.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: systemCertPoolWithBundle()}
-	transport.MaxIdleConnsPerHost = 8
-	transport.ResponseHeaderTimeout = 20 * time.Second
+	// 连接池给足：首页会同时向十几个站源要目录/海报，8 条空闲连接每源不够用，
+	// 反复新建 TLS 握手是「切分类要等一两秒」的主要来源。24 条足够覆盖单源突发。
+	transport.MaxIdleConns = 256
+	transport.MaxIdleConnsPerHost = 24
+	transport.IdleConnTimeout = 60 * time.Second
+	// 12 秒拿不到响应头就判失败，让上层尽快重试或换线路；20 秒会让弱线路
+	// 长时间占着并发槽位，表现成整页卡住。
+	transport.ResponseHeaderTimeout = 12 * time.Second
 	transport.Proxy = router.proxy
 	cdn := newCDNTransport(transport, newDNSResolver(transport))
 	// 浏览器指纹传输必须留住引用：自定义源新增/读取时要把自己的 host 登记进
@@ -317,7 +323,7 @@ func newNativeEngine(directory string) (*nativeEngine, error) {
 	// 自定义源与 XBPQ 的页面请求会走普通传输，直接被源站拒掉。
 	browserTransport := newHuangguoBrowserTransport(cdn, d)
 	d.browserTransport = browserTransport
-	d.client = &http.Client{Transport: browserTransport, Timeout: 45 * time.Second,
+	d.client = &http.Client{Transport: browserTransport, Timeout: 30 * time.Second,
 		CheckRedirect: func(request *http.Request, via []*http.Request) error {
 			if len(via) >= 10 {
 				return errors.New("站源重定向次数过多")

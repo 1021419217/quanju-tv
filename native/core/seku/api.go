@@ -196,7 +196,7 @@ func Cover(slot, rawURL string) ([]byte, error) {
 	if req.Header.Get("User-Agent") == "" {
 		req.Header.Set("User-Agent", "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36")
 	}
-	client := &http.Client{Timeout: 20 * time.Second}
+	client := &http.Client{Timeout: 20 * time.Second, Transport: sharedTransport}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err

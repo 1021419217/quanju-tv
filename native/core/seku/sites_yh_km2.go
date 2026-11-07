@@ -216,7 +216,7 @@ func yhKM2Form(pairs []yhKM2Pair) map[string]string {
 func yhKM2Candidates() []string {
 	out := []string{}
 	req, _ := http.NewRequest("GET", "http://119.28.28.28/d?dn=app.newkm-azuercdn.com", nil)
-	if resp, err := (&http.Client{Timeout: 8 * time.Second}).Do(req); err == nil {
+	if resp, err := (&http.Client{Timeout: 8 * time.Second, Transport: sharedTransport}).Do(req); err == nil {
 		b, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		parts := strings.FieldsFunc(string(b), func(r rune) bool { return r == ';' || r == ',' || r == '\n' || r == ' ' })
