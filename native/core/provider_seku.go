@@ -71,16 +71,11 @@ var sekuSlotPublicIDs = map[string]string{
 	"yh_lxs":         "v_lxs",
 	"yh_km2":         "v_km2",
 	"yh_maomi":       "v_maomi",
-	"yh_slf":         "v_slf",
-	"yh_iqiyi":       "v_iqiyi",
 	"yh_fulao2":      "v_fulao2",
-	"yh_nana":        "v_nana",
 	"yh_xj":          "v_xj",
 	"yh_cucumber":    "v_cucumber",
-	"yh_tomato":      "v_tomato",
 	"yh_avbobo":      "v_avbobo",
 	"yh_bilibili":    "v_bilibili",
-	"yh_bili2tx":     "v_bili2tx",
 	"yh_fruitpie":    "v_fruitpie",
 	"yh_melon":       "v_melon",
 	"yh_hl365":       "v_hl365",
@@ -562,7 +557,7 @@ func (engine *nativeEngine) sourceSpeedTest(ctx context.Context) []map[string]an
 		}
 		targets = append(targets, target{id: id, name: name, base: base})
 	}
-	// seku 影视源（v_ 前缀，78 个）
+	// seku 影视源（v_ 前缀，73 个）
 	for _, slot := range seku.Slots() {
 		add(sekuSourceID(slot), seku.SiteName(slot), seku.HomeURL(slot))
 	}

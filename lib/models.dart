@@ -109,7 +109,7 @@ class SourceSite {
     'wuguo',
   };
 
-  /// 影视站源（seku 引擎 · 移植自红蚁TV huoyi-104-source，共 78 个）
+  /// 影视站源（seku 引擎 · 移植自红蚁TV huoyi-104-source，共 73 个）
   static const videoValues = [
     SourceSite('v_missav', 'MissAV', 'MissAV 镜像 · 槽位 hongguo'),
     SourceSite('v_xvideos', 'XVideos', 'XVideos · 槽位 ikanbot'),
@@ -165,16 +165,11 @@ class SourceSite {
     SourceSite('v_lxs', '🔞撸先生', '欲火移植 · 封面解密 · 全链实拉'),
     SourceSite('v_km2', '🔞新快猫', '欲火移植 · 全链验通'),
     SourceSite('v_maomi', '🔞猫咪', '欲火移植 · 待真机验'),
-    SourceSite('v_slf', '🔞SLF', '欲火移植 · 待真机验'),
-    SourceSite('v_iqiyi', '🔞快手短视频', '欲火移植 · 待真机验'),
     SourceSite('v_fulao2', '🔞腐老二', '欲火移植 · 令牌门待解'),
-    SourceSite('v_nana', '🔞娜娜', '欲火移植 · 待真机验'),
     SourceSite('v_xj', '🔞香蕉视频', '欲火移植 · 全腿实测'),
     SourceSite('v_cucumber', '🔞黄瓜视频', '欲火移植 · 全链验通'),
-    SourceSite('v_tomato', '🔞番茄直播', '欲火移植 · 直播间目录 · 待真机验'),
     SourceSite('v_avbobo', '🔞AVbobo', '欲火移植 · 内置共享账号登录'),
     SourceSite('v_bilibili', '🔞逼哩', '欲火移植 · 待真机验'),
-    SourceSite('v_bili2tx', '🔞逼哩腾讯版', '欲火移植 · 待真机验'),
     SourceSite('v_fruitpie', '🔞水果派', '欲火移植 · 全链验通'),
     SourceSite('v_melon', '🔞melon', '欲火移植 · 全链验通'),
     SourceSite('v_hl365', '🔞黑料不打烊', '欲火移植 · 全链验通'),

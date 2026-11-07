@@ -200,7 +200,6 @@ import (
 //     before calling any content leg verified.
 
 const yhBiliSlot = "yh_bilibili"
-const yhBiliTxSlot = "yh_bili2tx"
 
 const yhBiliConst = "vEukA&w15z4VAD3kAY#fkL#rBnU!WDhN"
 const yhBiliCoverKey = "2019ysapp7527"
@@ -271,44 +270,6 @@ var yhBiliVariants = map[string]*yhBiliVariant{
 			{"11121", "最新"}, {"12581", "有声小说"},
 		},
 	},
-	yhBiliTxSlot: {
-		slot:       yhBiliTxSlot,
-		name:       "🔞逼哩腾讯版",
-		base:       "https://d2llr0wukhemwq.cloudfront.net/",
-		hmacKey:    "15z4VAD3kAY#fk",
-		xUA:        "DevType=Apple iPhone mobile https://d2llr0wukhemwq.cloudfront.net/home;SysType=h5_ios;Ver=1.0.0;BuildID=Mobile Safari 16.6",
-		loginKey:   "RcahRMTI7wKAYfkLrMomo" + "ASDhwihcQDHKsFWVwd",
-		affCode:    `{"SysType":"h5_ios"}`,
-		signSuffix: `&{"SysType":"h5_ios"}`,
-		pageVideo:  30, pageComic: 12, pageLive: 12, pageNovel: 30,
-		comicEndpoint: "comics/home",
-		novelEndpoint: "novel/topic/details",
-		shortEndpoint: "",
-		videoCats: []yhBiliCat{
-			{"16161", "精选"}, {"76482", "最新"}, {"76581", "原创"}, {"78361", "热门"},
-			{"16321", "乱伦"}, {"76582", "自制"}, {"76583", "萝莉"}, {"16241", "网黄"},
-			{"76721", "福利姬"}, {"16166", "欧美"}, {"16322", "综艺"},
-		},
-		comicCats: []yhBiliCat{
-			{"11501", "推荐"}, {"14704", "本子"}, {"29151", "同人"}, {"29451", "每日精选"},
-			{"30051", "最热"}, {"30791", "单篇推荐"}, {"10842", "最新"}, {"14702", "韩漫"},
-			{"22801", "国漫"},
-		},
-		animeCats: []yhBiliCat{
-			{"17641", "动漫精选"}, {"18642", "排行榜"}, {"17645", "最新"}, {"17642", "同人"},
-			{"17643", "3D"}, {"17644", "里番"}, {"51401", "泡面番"}, {"18641", "中文字幕"},
-			{"17646", "无码"},
-		},
-		liveCats: []yhBiliCat{
-			{"10041", "推荐"}, {"10105", "VR"}, {"10102", "乌克兰"}, {"10103", "新主播"},
-			{"17381", "调教母狗"}, {"10106", "日本"},
-		},
-		novelCats: []yhBiliCat{
-			{"28291", "都市激情"}, {"28292", "校园春色"}, {"28293", "乡村爱情"}, {"28294", "系统异能"},
-			{"28295", "家庭乱伦"}, {"28296", "穿越重生"}, {"28297", "经典武侠"}, {"28298", "同人改编"},
-			{"28299", "科学幻想"}, {"28300", "东方玄幻"}, {"28301", "娱乐明星"}, {"28302", "历史架空"},
-		},
-	},
 }
 
 type yhBiliClient struct {
@@ -321,8 +282,7 @@ type yhBiliClient struct {
 }
 
 var yhBiliClients = map[string]*yhBiliClient{
-	yhBiliSlot:   {},
-	yhBiliTxSlot: {},
+	yhBiliSlot: {},
 }
 
 func yhBiliClientFor(slot string) *yhBiliClient {
@@ -1058,11 +1018,7 @@ func yhBiliResolve(slot, rawID string) (map[string]interface{}, error) {
 func yhBiliComicPics(v *yhBiliVariant, c *yhBiliClient, chapterID string) ([]string, error) {
 	var inner map[string]interface{}
 	var err error
-	if v.slot == yhBiliTxSlot {
-		inner, err = yhBiliCall(v, c, "POST", "/api/app/comicsChapter/pics", map[string]interface{}{"id": mustInt(chapterID)})
-	} else {
-		inner, err = yhBiliCall(v, c, "POST", "/api/app/comics/chapter/detail", map[string]interface{}{"id": mustInt(chapterID)})
-	}
+	inner, err = yhBiliCall(v, c, "POST", "/api/app/comics/chapter/detail", map[string]interface{}{"id": mustInt(chapterID)})
 	if err != nil {
 		return nil, err
 	}
@@ -1252,7 +1208,7 @@ func yhBiliCoverFetch(rawurl string) ([]byte, error) {
 	// base; the two variants share the same default and the live
 	// config value, so testing both is safe.
 	imgHost := false
-	for _, slot := range []string{yhBiliSlot, yhBiliTxSlot} {
+	for _, slot := range []string{yhBiliSlot} {
 		c := yhBiliClientFor(slot)
 		c.mu.Lock()
 		base := c.imageBase
