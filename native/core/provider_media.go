@@ -260,7 +260,11 @@ func (d *Downloader) resolveProviderMedia(ctx context.Context, task Task) (provi
 			media.Referer = client.host + "/home"
 		}
 	}
-	if chapter.PageURL != "" && (chapter.Source == sourceHuangguoAI || chapter.Source == sourceHuangguoVideo) {
+	// 页面兜底只补「还没有地址」的情况。黄果 AI 的地址已经由上面的
+	// /api/videos/{id}/play 拿到，不能再用详情页解析结果覆盖——新站详情页
+	// 是前端渲染的空壳，解析出来是空串，会把刚取到的 m3u8 清掉，
+	// 表现就是封面/目录都正常、一点播放就报「未返回有效播放地址」。
+	if chapter.PageURL != "" && (chapter.Source == sourceHuangguoAI || chapter.Source == sourceHuangguoVideo) && !isProviderHTTPMediaURL(media.URL) {
 		responses := &playbackResponseURLs{}
 		pageContext := context.WithValue(ctx, playbackResponseURLsKey{}, responses)
 		body, err := d.fetchProviderText(pageContext, chapter.PageURL, media.Referer)

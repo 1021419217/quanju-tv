@@ -47,21 +47,43 @@ func (d *Downloader) apiEndpoint(ctx context.Context) (string, error) {
 				break
 			}
 		}
+		var pending []string
 		for _, candidate := range candidates {
 			if seen[candidate] || time.Now().Before(d.apiFailures[candidate]) {
 				continue
 			}
 			seen[candidate] = true
-			if err := ctx.Err(); err != nil {
-				return "", err
-			}
-			if err := d.probeAPIHost(ctx, candidate); err != nil {
-				lastErr = err
-				continue
-			}
-			d.apiBase = candidate
-			return candidate, nil
+			pending = append(pending, candidate)
 		}
+		if len(pending) == 0 {
+			continue
+		}
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+		// 并发探测：三个 cloudfront 候选里经常只有一路可达，串行探测会把
+		// 4 秒超时叠加成十几秒，前台等不及就报「黄果旧版加载失败」。
+		type probeResult struct {
+			host string
+			err  error
+		}
+		results := make(chan probeResult, len(pending))
+		probeCtx, cancel := context.WithTimeout(ctx, 6*time.Second)
+		for _, candidate := range pending {
+			go func(host string) {
+				results <- probeResult{host: host, err: d.probeAPIHost(probeCtx, host)}
+			}(candidate)
+		}
+		for range pending {
+			result := <-results
+			if result.err == nil {
+				cancel()
+				d.apiBase = result.host
+				return result.host, nil
+			}
+			lastErr = result.err
+		}
+		cancel()
 	}
 	return "", fmt.Errorf("黄果原 API 的候选域名均不可用: %w", publicError(lastErr))
 }
