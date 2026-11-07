@@ -74,12 +74,11 @@ class ExploreFeed extends ChangeNotifier {
     if (tab != null) _select(tab);
   }
 
+  /// 长按底栏「发现」触发的强制刷新：分类和当前列表都绕过缓存重拉一次。
   Future<void> refresh() async {
     final catalog = _catalog;
     if (catalog == null) return;
-    if (catalog.categories.length == 1) {
-      unawaited(_loadCategories(catalog, force: true));
-    }
+    await _loadCategories(catalog, force: true);
     await _feed?.reload(force: true);
   }
 

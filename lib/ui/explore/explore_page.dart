@@ -38,7 +38,8 @@ class ExplorePageState extends State<ExplorePage>
   /// 每个分类（source|tab）各自记住滚动位置，切走再切回来时回到原处。
   final Map<String, double> _offsets = {};
   double? _restoreTarget;
-  String? _swipeHint;
+  String? _hintText;
+  IconData _hintIcon = Icons.swap_horiz_rounded;
   Timer? _hintTimer;
 
   /// 切分类时的内容过渡动画：初始停在完成态（value = 1），切换时
@@ -69,8 +70,28 @@ class ExplorePageState extends State<ExplorePage>
 
   Future<void> refresh() async {
     _restoreTarget = null;
+    _offsets[_shown] = 0;
     if (_scroll.hasClients) _scroll.jumpTo(0);
-    await _explore?.refresh();
+    _showHint('正在刷新…', Icons.sync_rounded, hold: const Duration(seconds: 10));
+    try {
+      await _explore?.refresh();
+      if (!mounted) return;
+      // 列表请求失败时 DramaFeed 不抛异常，只把错误记在 error 上，
+      // 所以这里要读一次，避免明明刷挂了还提示「已刷新」。
+      final failed = (_explore?.feed?.error ?? '').isNotEmpty;
+      _showHint(
+        failed ? '刷新失败，稍后再试' : '已刷新',
+        failed ? Icons.error_outline_rounded : Icons.check_circle_outline_rounded,
+        hold: const Duration(milliseconds: 1400),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      _showHint(
+        '刷新失败，稍后再试',
+        Icons.error_outline_rounded,
+        hold: const Duration(milliseconds: 1800),
+      );
+    }
   }
 
   /// 当前滚动偏移，供底栏「发现」单击判断是否已经在顶部。
@@ -110,11 +131,18 @@ class ExplorePageState extends State<ExplorePage>
     _showTabHint(tabs[next].name);
   }
 
-  void _showTabHint(String name) {
+  void _showTabHint(String name) =>
+      _showHint(name, Icons.swap_horiz_rounded);
+
+  /// 顶部中央浮出的玻璃提示胶囊（切分类、刷新状态共用）。
+  void _showHint(String text, IconData icon, {Duration? hold}) {
     _hintTimer?.cancel();
-    setState(() => _swipeHint = name);
-    _hintTimer = Timer(const Duration(milliseconds: 1100), () {
-      if (mounted) setState(() => _swipeHint = null);
+    setState(() {
+      _hintText = text;
+      _hintIcon = icon;
+    });
+    _hintTimer = Timer(hold ?? const Duration(milliseconds: 1100), () {
+      if (mounted) setState(() => _hintText = null);
     });
   }
 
@@ -168,7 +196,7 @@ class ExplorePageState extends State<ExplorePage>
   Widget _swipeHintBadge() => IgnorePointer(
     child: Center(
       child: AnimatedOpacity(
-        opacity: _swipeHint == null ? 0 : 1,
+        opacity: _hintText == null ? 0 : 1,
         duration: const Duration(milliseconds: 180),
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
@@ -181,13 +209,13 @@ class ExplorePageState extends State<ExplorePage>
             mainAxisSize: MainAxisSize.min,
             children: [
               Icon(
-                Icons.swap_horiz_rounded,
+                _hintIcon,
                 size: 15,
                 color: Colors.white.withValues(alpha: 0.8),
               ),
               const SizedBox(width: 7),
               Text(
-                _swipeHint ?? '',
+                _hintText ?? '',
                 style: const TextStyle(
                   fontSize: 14,
                   fontWeight: FontWeight.w800,

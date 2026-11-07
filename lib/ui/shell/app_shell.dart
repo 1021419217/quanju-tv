@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:ui' show ImageFilter;
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -69,12 +70,19 @@ class _AppShellState extends State<AppShell>
   final _header = FocusNode();
   final _televisionTabs = GlobalKey();
   final _explore = GlobalKey<ExplorePageState>();
+
+  /// 底栏容器，用于把长按判定范围铺到整条底栏（图标 + 文字）。
+  final _navBarKey = GlobalKey();
   var _tab = AppTab.explore;
   var _headerFocused = false;
   FocusNode? _lastFocus;
 
   /// 首页「再按一次返回退出应用」的倒计时窗口；非空时下一次返回键才真正退出。
   Timer? _exitWindow;
+
+  /// 底栏「发现」长按刷新的计时状态。
+  Timer? _navHold;
+  Offset? _navAnchor;
   DownloadOverview? _downloads;
   DownloadConverter? _converter;
   FollowUpdater? _followUpdater;
@@ -115,6 +123,7 @@ class _AppShellState extends State<AppShell>
     _mineEntry.dispose();
     _header.dispose();
     _exitWindow?.cancel();
+    _navHold?.cancel();
     _converter?.dispose();
     _downloads?.dispose();
     _followUpdater?.dispose();
@@ -253,19 +262,26 @@ class _AppShellState extends State<AppShell>
               : ClipRect(
                   child: BackdropFilter(
                     filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
-                    child: NavigationBar(
-                      selectedIndex: _tab.index,
-                      onDestinationSelected: (index) =>
-                          _select(AppTab.values[index]),
-                      destinations: [
-                        for (final tab in AppTab.values)
-                          NavigationDestination(
-                            key: ValueKey('nav-${tab.name}'),
-                            icon: _navIcon(tab, tab.icon),
-                            selectedIcon: _navIcon(tab, tab.selectedIcon),
-                            label: tab.label,
-                          ),
-                      ],
+                    child: Listener(
+                      key: _navBarKey,
+                      onPointerDown: _navPointerDown,
+                      onPointerMove: _navPointerMove,
+                      onPointerUp: (_) => _cancelNavHold(),
+                      onPointerCancel: (_) => _cancelNavHold(),
+                      child: NavigationBar(
+                        selectedIndex: _tab.index,
+                        onDestinationSelected: (index) =>
+                            _select(AppTab.values[index]),
+                        destinations: [
+                          for (final tab in AppTab.values)
+                            NavigationDestination(
+                              key: ValueKey('nav-${tab.name}'),
+                              icon: _navIcon(tab, tab.icon),
+                              selectedIcon: _navIcon(tab, tab.selectedIcon),
+                              label: tab.label,
+                            ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
@@ -319,15 +335,39 @@ class _AppShellState extends State<AppShell>
       ? _DownloadBadge(downloads: _downloads!, child: icon)
       : icon;
 
-  /// 底部「发现」图标支持长按刷新当前分类，其余 tab 维持原样。
-  Widget _navIcon(AppTab tab, IconData icon) {
-    final child = _badged(tab, Icon(icon));
-    if (tab != AppTab.explore) return child;
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onLongPress: _refreshExplore,
-      child: child,
-    );
+  /// 图标本身只负责显示，长按刷新统一由底栏 Listener 判定。
+  Widget _navIcon(AppTab tab, IconData icon) => _badged(tab, Icon(icon));
+
+  /// 底栏长按刷新：判定范围铺满整条底栏的「发现」项（图标 + 文字），
+  /// 而不是只有 24px 的图标本身。只旁听指针事件，不参与手势竞技，
+  /// 所以单击选中、滑动切换等原有行为完全不受影响。
+  void _navPointerDown(PointerDownEvent event) {
+    _cancelNavHold();
+    final box = _navBarKey.currentContext?.findRenderObject();
+    if (box is! RenderBox || !box.hasSize || box.size.width <= 0) return;
+    final slot = box.size.width / AppTab.values.length;
+    final index = (event.localPosition.dx / slot).floor();
+    if (index < 0 || index >= AppTab.values.length) return;
+    if (AppTab.values[index] != AppTab.explore) return;
+    _navAnchor = event.position;
+    _navHold = Timer(const Duration(milliseconds: 520), () {
+      _navHold = null;
+      _navAnchor = null;
+      _refreshExplore();
+    });
+  }
+
+  /// 手指在长按判定期间明显移动（滑动底栏）就取消，避免误触。
+  void _navPointerMove(PointerMoveEvent event) {
+    final anchor = _navAnchor;
+    if (anchor == null) return;
+    if ((event.position - anchor).distance > 14) _cancelNavHold();
+  }
+
+  void _cancelNavHold() {
+    _navHold?.cancel();
+    _navHold = null;
+    _navAnchor = null;
   }
 
   void _refreshExplore() {
