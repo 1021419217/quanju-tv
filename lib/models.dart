@@ -30,6 +30,9 @@ class SourceSite {
       id == 'a123' ||
       id == 'xchina' ||
       id == 'theporny' ||
+      id == 'jinguoduanju' ||
+      id == 'jinguo' ||
+      id == 'heitao' ||
       duanjuPaged;
 
   /// 短剧家族里支持翻页的源（与 Go 侧 duanjuSourceSpec.Paged 对齐）。
@@ -63,6 +66,9 @@ class SourceSite {
   );
   static const ikanbot = SourceSite('ikanbot', '爱看机器人', '电影 · 剧集 · 多线路搜索');
   static const a123 = SourceSite('a123', 'A123', '电影 · 连续剧 · 综艺 · 动漫 · 多线路');
+  static const jinguoduanju = SourceSite('jinguoduanju', '禁果短剧', '推荐 · 分类短剧 · 在线搜索');
+  static const jinguo = SourceSite('jinguo', '禁果', '精选 · 最新 · 分类短剧 · 在线搜索');
+  static const heitao = SourceSite('heitao', '黑桃', '分类短剧 · 在线搜索');
 
   /// 短剧家族内置源（全剧视界可用），与 Go 侧 duanjuProviderCatalog 对齐。
   static const duanjuValues = [
@@ -201,6 +207,9 @@ class SourceSite {
     SourceSite('huangju', '剧果', '热门 · 最新 · 分类短剧'),
     SourceSite('yeguo', '野果', '分类短剧 · 在线搜索'),
     dsd,
+    jinguoduanju,
+    jinguo,
+    heitao,
     SourceSite('xchina', 'XChina', '分类视频 · 在线搜索'),
     SourceSite('theporny', 'Theporny', '分类视频 · 在线搜索'),
     SourceSite('huangguo-video', '黄果视频', '视频剧集'),

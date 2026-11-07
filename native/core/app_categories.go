@@ -95,6 +95,12 @@ func validNativeCategory(source, category string) bool {
 	case sourceTheporny:
 		_, ok := validThepornyCategory(category)
 		return ok
+	case sourceJinguoDuanju:
+		return validJinguoDuanjuCategory(category)
+	case sourceJinguo:
+		return validJinguoCategory(category)
+	case sourceHeitao:
+		return validHeitaoCategory(category)
 	case sourceFanqie:
 		_, ok := fanqieCategoryTabTypes[category]
 		return ok
@@ -191,6 +197,24 @@ func (engine *nativeEngine) nativeCategories(ctx context.Context, source string,
 		all = append(all, d.fetchXChinaCategories()...)
 	case sourceTheporny:
 		all = append(all, d.fetchThepornyCategories()...)
+	case sourceJinguoDuanju:
+		var categories []nativeCategory
+		categories, err = d.fetchJinguoDuanjuCategories(ctx)
+		if err == nil {
+			all = append(all, categories...)
+		}
+	case sourceJinguo:
+		var categories []nativeCategory
+		categories, err = d.fetchJinguoCategories(ctx)
+		if err == nil {
+			all = append(all, categories...)
+		}
+	case sourceHeitao:
+		var categories []nativeCategory
+		categories, err = d.fetchHeitaoCategories(ctx)
+		if err == nil {
+			all = append(all, categories...)
+		}
 	default:
 		if slot, ok := sekuSlotForSource(source); ok {
 			seku.Init(engine.directory)

@@ -42,6 +42,9 @@ type Config struct {
 	FanqieURL    string
 	XChinaURL    string
 	ThepornyURL  string
+	JinguoURL    string
+	JinguoDuanjuURL string
+	HeitaoURL    string
 	Token        string
 	AESKeyHex    string
 	InterfaceKey string
@@ -72,6 +75,10 @@ type Downloader struct {
 	xchinaCore            *xchinaClient
 	thepornyOnce          sync.Once
 	thepornyCore          *thepornyClient
+	jinguoOnce            sync.Once
+	jinguo                *jinguoAPIClient
+	jinguoDuanjuOnce      sync.Once
+	jinguoDuanju          *jinguoDuanjuAPIClient
 	huangjuOnce           sync.Once
 	huangju               *huangjuAPIClient
 	yeguoOnce             sync.Once
@@ -732,6 +739,12 @@ func (engine *nativeEngine) nativeCatalog(ctx context.Context, input nativeInput
 		items, result.HasMore, err = d.fetchXChinaCatalogPage(ctx, page, category, "")
 	case sourceTheporny:
 		items, result.HasMore, err = d.fetchThepornyCatalogPage(ctx, page, category, "")
+	case sourceJinguoDuanju:
+		items, result.HasMore, err = d.fetchJinguoDuanjuCatalogPage(ctx, page, category, "")
+	case sourceJinguo:
+		items, result.HasMore, err = d.fetchJinguoCatalogPage(ctx, page, category, "")
+	case sourceHeitao:
+		items, result.HasMore, err = d.fetchHeitaoCatalogPage(ctx, page, category, "")
 	default:
 		if isSekuSource(source) {
 			seku.Init(engine.directory)
@@ -744,7 +757,7 @@ func (engine *nativeEngine) nativeCatalog(ctx context.Context, input nativeInput
 	if err != nil && len(items) == 0 {
 		return result, err
 	}
-	if len(items) == 0 && page == 1 && source != sourceHuangju && source != sourceYeguo && source != sourceDSD && source != sourceSorani && source != sourceGuipian && source != sourceHanxiaoquan && source != sourceFanqie {
+	if len(items) == 0 && page == 1 && source != sourceHuangju && source != sourceYeguo && source != sourceDSD && source != sourceSorani && source != sourceGuipian && source != sourceHanxiaoquan && source != sourceFanqie && source != sourceJinguoDuanju && source != sourceJinguo && source != sourceHeitao {
 		return result, errors.New("站源暂未返回剧集，请稍后刷新")
 	}
 	if err != nil {
@@ -799,6 +812,12 @@ func (engine *nativeEngine) nativeDetail(ctx context.Context, drama nativeDrama)
 		raw, chapters, err = engine.downloader.fetchXChinaDetail(ctx, sourceID)
 	case sourceTheporny:
 		raw, chapters, err = engine.downloader.fetchThepornyDetail(ctx, sourceID)
+	case sourceJinguoDuanju:
+		raw, chapters, err = engine.downloader.fetchJinguoDuanjuDetail(ctx, sourceID)
+	case sourceJinguo:
+		raw, chapters, err = engine.downloader.fetchJinguoDetail(ctx, sourceID)
+	case sourceHeitao:
+		raw, chapters, err = engine.downloader.fetchHeitaoDetail(ctx, sourceID)
 	default:
 		title, chapters, err = engine.downloader.GetHuangguoChapters(ctx, source, sourceID)
 	}

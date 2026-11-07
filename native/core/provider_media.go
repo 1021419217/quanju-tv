@@ -62,6 +62,12 @@ func (d *Downloader) providerBaseURL(source string) string {
 		configured, fallback = d.cfg.XChinaURL, xchinaBaseURL
 	case sourceTheporny:
 		configured, fallback = d.cfg.ThepornyURL, thepornyHosts[0]
+	case sourceJinguoDuanju:
+		configured, fallback = d.cfg.JinguoDuanjuURL, jinguoDuanjuBaseURL
+	case sourceJinguo:
+		configured, fallback = d.cfg.JinguoURL, jinguoAPIHosts[0]
+	case sourceHeitao:
+		configured, fallback = d.cfg.HeitaoURL, heitaoBaseURL
 	default:
 		fallback = "https://d2pypzndaqisk.cloudfront.net"
 	}
@@ -187,6 +193,15 @@ func (d *Downloader) resolveProviderMedia(ctx context.Context, task Task) (provi
 	}
 	if chapter.Source == sourceTheporny {
 		return d.resolveThepornyMedia(ctx, task)
+	}
+	if chapter.Source == sourceJinguoDuanju {
+		return d.resolveJinguoDuanjuMedia(ctx, task)
+	}
+	if chapter.Source == sourceJinguo {
+		return d.resolveJinguoMedia(ctx, task)
+	}
+	if chapter.Source == sourceHeitao {
+		return d.resolveHeitaoMedia(ctx, task)
 	}
 	if isDuanjuProviderSource(chapter.Source) {
 		return d.resolveDuanjuMedia(ctx, task)

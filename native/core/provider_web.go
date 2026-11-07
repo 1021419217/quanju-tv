@@ -13,6 +13,7 @@ import (
 )
 
 type providerTextUserAgentKey struct{}
+type providerTextCookieKey struct{}
 type providerTextNoCacheKey struct{}
 
 // providerTextHeadersKey 让调用方（目前是 XBPQ 自定义源的 头部集合/播放请求头）

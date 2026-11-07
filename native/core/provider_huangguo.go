@@ -37,6 +37,9 @@ const (
 	sourceFanqie   = "fanqie"
 	sourceXChina   = "xchina"
 	sourceTheporny = "theporny"
+	sourceJinguoDuanju = "jinguoduanju"
+	sourceJinguo        = "jinguo"
+	sourceHeitao        = "heitao"
 
 	providerMaxBodyBytes = 20 * 1024 * 1024
 	providerTimeout      = 12 * time.Second
@@ -442,6 +445,9 @@ func (d *Downloader) fetchProviderText(ctx context.Context, rawURL, referer stri
 			req.Header.Set("User-Agent", userAgent)
 			if agent, ok := ctx.Value(providerTextUserAgentKey{}).(string); ok && agent != "" {
 				req.Header.Set("User-Agent", agent)
+			}
+			if cookie, ok := ctx.Value(providerTextCookieKey{}).(string); ok && cookie != "" {
+				req.Header.Set("Cookie", cookie)
 			}
 			if providerSourceForURL(rawURL) != "" {
 				req.Header.Set("Referer", providerRefererForURL(candidate, referer))
