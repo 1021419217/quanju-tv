@@ -122,7 +122,11 @@ class _AppShellState extends State<AppShell>
   }
 
   void _select(AppTab tab) {
-    if (tab == _tab) return;
+    if (tab == _tab) {
+      // 已在「发现」时再单击一次图标 = 平滑回到顶部。
+      if (tab == AppTab.explore) _scrollExploreToTop();
+      return;
+    }
     // 按 tab 顺序决定新页从左侧还是右侧滑入，和首页滑分类的方向感一致。
     _tabDirection = tab.index > _tab.index ? 1 : -1;
     _tabAnim.forward(from: 0);
@@ -330,6 +334,14 @@ class _AppShellState extends State<AppShell>
     unawaited(HapticFeedback.mediumImpact());
     final state = _explore.currentState;
     if (state != null) unawaited(state.refresh());
+  }
+
+  void _scrollExploreToTop() {
+    final state = _explore.currentState;
+    if (state == null) return;
+    if (state.scrollOffset <= 0.5) return;
+    unawaited(HapticFeedback.selectionClick());
+    unawaited(state.scrollToTop());
   }
 
   Widget _televisionHeader() {

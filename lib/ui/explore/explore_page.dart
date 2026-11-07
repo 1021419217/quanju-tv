@@ -73,6 +73,26 @@ class ExplorePageState extends State<ExplorePage>
     await _explore?.refresh();
   }
 
+  /// 当前滚动偏移，供底栏「发现」单击判断是否已经在顶部。
+  double get scrollOffset => _scroll.hasClients ? _scroll.offset : 0;
+
+  /// 底栏「发现」单击：平滑回到当前分类顶部。
+  /// 同时把该分类记住的位置归零，避免切走再切回来又跳回原处。
+  Future<void> scrollToTop() async {
+    _restoreTarget = null;
+    if (_shown.isNotEmpty) _offsets[_shown] = 0;
+    if (!_scroll.hasClients || _scroll.offset <= 0.5) return;
+    try {
+      await _scroll.animateTo(
+        0,
+        duration: const Duration(milliseconds: 320),
+        curve: Curves.easeOutCubic,
+      );
+    } catch (_) {
+      // 动画途中页面被销毁或控制器解绑，忽略即可。
+    }
+  }
+
   /// 主屏左右快滑切换相邻分类：左滑下一个、右滑上一个，到头即停。
   /// 分类栏会自动滚动到新选中的标签，内容由 ExploreFeed 重新加载。
   void _switchTabBy(ExploreFeed explore, int delta) {
