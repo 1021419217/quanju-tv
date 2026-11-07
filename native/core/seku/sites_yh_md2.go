@@ -383,7 +383,7 @@ func yhMd2CoverFetch(u string) ([]byte, error) {
 func init() {
 	registerSite("yh_md2", &siteImpl{
 		Key:        "yh_md2",
-		Name:       "🔞麻豆2",
+		Name:       "麻豆2",
 		DefaultCat: "latest",
 		HomeURL:    yhMd2Base + "/",
 		Categories: yhMd2Categories,

@@ -272,7 +272,7 @@ func xhyResolve(slot, rawID string) (map[string]interface{}, error) {
 
 func init() {
 	impl := &siteImpl{
-		Key: "xhy11", Name: "🔞小黄鸭", DefaultCat: "56", HomeURL: xhyBase + "/",
+		Key: "xhy11", Name: "小黄鸭", DefaultCat: "56", HomeURL: xhyBase + "/",
 		Headers: xhyHeaders,
 	}
 	impl.Categories = func(slot string) []interface{} {

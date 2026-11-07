@@ -39,8 +39,8 @@ var slotSites = map[string]*siteImpl{}
 // slots (status lists, cross search defaults).
 var slotOrder = []string{
 	"hongguo", "ikanbot", "a123", "hanxiaoquan", "guipian",
-	"huangdou", "huangju", "yeguo", "dsd", "huangguo-video",
-	"huangguoai", "cloudfront", "yaguo", "maoguo", "fanguo",
+	"huangdou", "huangju", "yeguo", "dsd", "v_javmit",
+	"v_vjav", "cloudfront", "yaguo", "maoguo", "fanguo",
 	"guanguo", "heguo", "xingguo", "huaguo", "niuguo",
 	"wangguo", "faguo", "wuguo",
 	"javmenu", "pektino", "xszav", "av123",

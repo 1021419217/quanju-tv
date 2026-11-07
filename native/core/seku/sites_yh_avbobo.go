@@ -824,7 +824,7 @@ func yhAvboboHeaders() map[string]string {
 func init() {
 	registerSite(yhAvboboSlot, &siteImpl{
 		Key:        yhAvboboSlot,
-		Name:       "🔞AVbobo",
+		Name:       "AVbobo",
 		DefaultCat: "hot",
 		HomeURL:    yhAvboboHosts[0] + "/",
 		Headers:    yhAvboboHeaders,

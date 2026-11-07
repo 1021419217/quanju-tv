@@ -595,7 +595,7 @@ func yhMMHeaders() map[string]string {
 func init() {
 	registerSite(yhMMSlot, &siteImpl{
 		Key:        yhMMSlot,
-		Name:       "🔞猫咪",
+		Name:       "猫咪",
 		DefaultCat: "home",
 		HomeURL:    "http://124.156.98.46:8089/",
 		Headers:    yhMMHeaders,

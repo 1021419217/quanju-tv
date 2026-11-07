@@ -35,12 +35,12 @@ const (
 	sourceA123          = "a123"
 	sourceIkanbot       = "ikanbot"
 	// sourceFanqie 番茄：目录/搜索/详情/取流转发给本机番茄内容引擎（127.0.0.1:18921）。
-	sourceFanqie   = "fanqie"
-	sourceXChina   = "xchina"
-	sourceTheporny = "theporny"
+	sourceFanqie       = "fanqie"
+	sourceXChina       = "xchina"
+	sourceTheporny     = "theporny"
 	sourceJinguoDuanju = "jinguoduanju"
-	sourceJinguo        = "jinguo"
-	sourceHeitao        = "heitao"
+	sourceJinguo       = "jinguo"
+	sourceHeitao       = "heitao"
 
 	providerMaxBodyBytes = 20 * 1024 * 1024
 	providerTimeout      = 12 * time.Second
@@ -48,7 +48,7 @@ const (
 
 var (
 	// 黄果改版后主站是 *.gitiecgad.cc（旧 huangguoai.com 域已停解析）。
-	huangguoAIBaseURL     = "https://26d.gitiecgad.cc"
+	huangguoAIBaseURL = "https://26d.gitiecgad.cc"
 	// 黄果短剧的域名整组换过：原来的 huangguoai.com / *.ediayikma.cc 已经
 	// 全部失效（实测 8 秒无响应），新站是 *.gitiecgad.cc。旧域名一条都不能
 	// 留在前面——每撞一个就是 8 秒空等，首页直接卡住。因此只把实测可用的

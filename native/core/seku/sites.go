@@ -10,7 +10,7 @@ package seku
 func init() {
 	// Pilot sites (ported in the v1-v4 rounds, kept in their slots).
 	registerSite(slotHsck, &siteImpl{
-		Key: "hsck", Name: "🔞黄色仓库", DefaultCat: "new", HomeURL: hsckHost + "/",
+		Key: "hsck", Name: "黄色仓库", DefaultCat: "new", HomeURL: hsckHost + "/",
 		Categories: func(slot string) []interface{} { return hsckCategories(slot) },
 		Catalog:    hsckCatalog,
 		Detail:     hsckDetail,
@@ -22,7 +22,7 @@ func init() {
 		Headers: hsckHeaders,
 	}, "黄色仓库")
 	registerSite(slotDayday, &siteImpl{
-		Key: "dayday", Name: "🔞天天A片", DefaultCat: "new", HomeURL: daydayBase + "/",
+		Key: "dayday", Name: "天天A片", DefaultCat: "new", HomeURL: daydayBase + "/",
 		Categories: func(slot string) []interface{} {
 			out := []interface{}{}
 			for _, c := range daydayCats {

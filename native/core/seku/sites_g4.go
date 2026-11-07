@@ -653,7 +653,7 @@ func init() {
 	// kept intact below for possible later reuse.
 	if false {
 		registerSite(g4Slot17c, &siteImpl{
-			Key: "17c", Name: "🔞17c", DefaultCat: "home", HomeURL: g4C17Cfg.Host + "/",
+			Key: "17c", Name: "17c", DefaultCat: "home", HomeURL: g4C17Cfg.Host + "/",
 			Categories: func(slot string) []interface{} {
 				out := []interface{}{}
 				for _, c := range g4C17Cats {
@@ -674,7 +674,7 @@ func init() {
 	// kept intact for possible later reuse, same as 17c above.
 	if false {
 		registerSite(g4Slot91n, &siteImpl{
-			Key: "91n", Name: "🔞91n", DefaultCat: "relist", HomeURL: g4N91Cfg.Host + "/",
+			Key: "91n", Name: "91n", DefaultCat: "relist", HomeURL: g4N91Cfg.Host + "/",
 			Categories: func(slot string) []interface{} {
 				out := []interface{}{}
 				for _, c := range g4N91Cats {

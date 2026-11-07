@@ -322,7 +322,7 @@ func z2MmResolve(slot, rawID string) (map[string]interface{}, error) {
 }
 
 func init() {
-	av6k := htmlProfileImpl("z2_av6k", "🔞AV6K", z2Av6kProfile)
+	av6k := htmlProfileImpl("z2_av6k", "AV6K", z2Av6kProfile)
 	av6k.Catalog = z2PagedCatalog(z2Av6kProfile, "z2_av6k", func(cat string, page int) string {
 		if page <= 1 {
 			return z2Av6kProfile.Base + "/" + cat + "/"
@@ -334,13 +334,13 @@ func init() {
 	})
 	registerSite("z2_av6k", av6k, "av6k")
 
-	mm := htmlProfileImpl("z2_7mm", "🔞7MMTV", z2MmProfile)
+	mm := htmlProfileImpl("z2_7mm", "7MMTV", z2MmProfile)
 	mm.Resolve = z2MmResolve
 	registerSite("z2_7mm", mm, "7mmtv")
 
-	registerSite("z2_xanimu", htmlProfileImpl("z2_xanimu", "🔞Xanimu", z2XanimuProfile), "xanimu")
+	registerSite("z2_xanimu", htmlProfileImpl("z2_xanimu", "Xanimu", z2XanimuProfile), "xanimu")
 
-	cn := htmlProfileImpl("z2_cn", "🔞中文秘密资源", z2CnProfile)
+	cn := htmlProfileImpl("z2_cn", "中文秘密资源", z2CnProfile)
 	cn.Catalog = z2PagedCatalog(z2CnProfile, "z2_cn", func(cat string, page int) string {
 		if page <= 1 {
 			return z2CnProfile.Base + "/962a/vodtype/" + cat

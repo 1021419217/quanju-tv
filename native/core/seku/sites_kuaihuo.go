@@ -3,7 +3,7 @@ package seku
 // ---- 快活影院 (kuaihuo) — static HTML + Netlify search API ----
 //
 // Ported from the user's ZakaTV jar class ZakaKuaihuoAmns (config key
-// kuaihuo "🔞快活影院┃静态站直取"), re-grounded on live pages fetched
+// kuaihuo "快活影院┃静态站直取"), re-grounded on live pages fetched
 // 2026-10-24 from this egress:
 //   - Seed host tbryy.opsizte.com 301s to a rotating live host
 //     (tbryy.ksdlcme.cn today) and collapses deep paths to the root, so
@@ -356,7 +356,7 @@ func khSearch(slot, kw string) ([]interface{}, error) {
 
 func init() {
 	registerSite("kuaihuo", &siteImpl{
-		Key: "kuaihuo", Name: "🔞快活影院", DefaultCat: "shipin", HomeURL: khSeedHost + "/",
+		Key: "kuaihuo", Name: "快活影院", DefaultCat: "shipin", HomeURL: khSeedHost + "/",
 		Categories: khCategories,
 		Catalog:    khCatalog,
 		Detail:     khDetail,

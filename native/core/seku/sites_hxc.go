@@ -450,7 +450,7 @@ func hxcCoverFetch(rawURL string) ([]byte, error) {
 
 func init() {
 	registerSite("hxc", &siteImpl{
-		Key: "hxc", Name: "🔞含羞草", DefaultCat: "4", HomeURL: hxcHosts[0],
+		Key: "hxc", Name: "含羞草", DefaultCat: "4", HomeURL: hxcHosts[0],
 		Categories: func(slot string) []interface{} {
 			out := []interface{}{}
 			for _, c := range hxcCategories() {

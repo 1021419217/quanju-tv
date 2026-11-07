@@ -759,7 +759,7 @@ func yhFL2Search(slot, kw string) ([]interface{}, error) {
 func init() {
 	registerSite(yhFL2Slot, &siteImpl{
 		Key:        yhFL2Slot,
-		Name:       "🔞腐老二",
+		Name:       "腐老二",
 		DefaultCat: "menu:5:uncover:time::96",
 		HomeURL:    yhFL2DefaultAPI + "/",
 		Headers:    yhFL2Headers,

@@ -333,7 +333,27 @@ func z2Av321TailSegment(path string) string {
 	parts := strings.Split(path, "/")
 	for i := len(parts) - 1; i >= 0; i-- {
 		seg := strings.TrimSpace(parts[i])
-		if seg != "" && seg != "cn" {
+		if seg == "" || seg == "cn" {
+			continue
+		}
+		// 播放页里那段 base64 有时只解出半截 JSON，例如
+		// [["标清","https://321av.net/cn/fntr-004"]]}
+		// 直接把最后一段当 slug 会把 "]]} 之类的残渣拼进请求路径，
+		// 站点回 404，表现就是「有目录、点进去播不了」。
+		// slug 只可能是字母数字加 - _ .，截到第一个非法字符为止。
+		if cut := strings.IndexFunc(seg, func(r rune) bool {
+			switch {
+			case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+				return false
+			case r == '-', r == '_', r == '.':
+				return false
+			}
+			return true
+		}); cut >= 0 {
+			seg = seg[:cut]
+		}
+		seg = strings.TrimSuffix(strings.TrimSuffix(seg, ".html"), ".")
+		if seg != "" {
 			return seg
 		}
 	}
@@ -586,14 +606,14 @@ func z2Av321Resolve(slot, rawID string) (map[string]interface{}, error) {
 }
 
 func init() {
-	rip := htmlProfileImpl("z2_17rip", "🔞17rip", z2RipProfile)
+	rip := htmlProfileImpl("z2_17rip", "17rip", z2RipProfile)
 	rip.Catalog = z2PagedCatalog(z2RipProfile, "z2_17rip", func(cat string, page int) string {
 		return z2RipListURL(cat, page)
 	})
 	rip.Resolve = z2RipResolve
 	registerSite("z2_17rip", rip, "17rip")
 
-	a321 := htmlProfileImpl("z2_321av", "🔞321AV", z2Av321Profile)
+	a321 := htmlProfileImpl("z2_321av", "321AV", z2Av321Profile)
 	a321.Catalog = z2Av321Catalog
 	a321.Search = z2Av321Search
 	genericDetail := a321.Detail

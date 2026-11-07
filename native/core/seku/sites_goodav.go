@@ -420,7 +420,7 @@ func gaSearch(slot, kw string) ([]interface{}, error) {
 
 func init() {
 	registerSite("goodav", &siteImpl{
-		Key: "goodav", Name: "🔞GoodAV", DefaultCat: "home", HomeURL: gaHost + "/",
+		Key: "goodav", Name: "GoodAV", DefaultCat: "home", HomeURL: gaHost + "/",
 		Categories: gaCategories,
 		Catalog:    gaCatalog,
 		Detail:     gaDetail,

@@ -25,8 +25,6 @@ var sekuSlotPublicIDs = map[string]string{
 	"huangju":        "v_91sanji",
 	"yeguo":          "v_hstv",
 	"dsd":            "v_dsd",
-	"huangguo-video": "v_javmit",
-	"huangguoai":     "v_vjav",
 	"cloudfront":     "v_qishe",
 	"yaguo":          "v_aipornx",
 	"maoguo":         "v_51xz",
@@ -121,9 +119,19 @@ func sekuSlotForSource(source string) (string, bool) {
 	return "", false
 }
 
+// isSekuPlainSharedSource 列出「有原生实现、且与 seku 槽位同名的源」。
+// 这些 id 必须优先走原生实现，否则会被 seku 的同名槽位抢走：
+//   - huangguoai  / huangguo-video / cloudfront 的原生实现分别对接黄果
+//     AI（*.gitiecgad.cc）、黄果视频、旧版剧库，而 seku 里恰好也有同名
+//     槽位（vjav / javmit / qishe）。没有这道白名单时，前端选「黄果 AI」
+//     会被送进 vjav 实现，站点一挂就表现为「无封面 + 不能播」。
+//   - UI 里访问这些 seku 站点用的是 v_ 前缀 id（v_vjav / v_javmit /
+//     v_qishe），仍能正常命中对应槽位。
 func isSekuPlainSharedSource(source string) bool {
 	switch source {
-	case sourceHongguo, sourceIkanbot, sourceA123, sourceHanxiaoquan, sourceGuipian, sourceHuangdou, sourceHuangju, sourceYeguo:
+	case sourceHongguo, sourceIkanbot, sourceA123, sourceHanxiaoquan, sourceGuipian,
+		sourceHuangdou, sourceHuangju, sourceYeguo,
+		sourceHuangguoAI, sourceHuangguoVideo, sourceCloudFront:
 		return true
 	}
 	return false

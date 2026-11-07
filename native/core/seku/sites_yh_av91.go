@@ -726,7 +726,7 @@ func yhAv91CoverFetch(u string) ([]byte, error) {
 func init() {
 	registerSite(yhAv91Slot, &siteImpl{
 		Key:        yhAv91Slot,
-		Name:       "🔞av91",
+		Name:       "av91",
 		DefaultCat: "screen:::1",
 		HomeURL:    yhAv91Base + "/",
 		Headers:    yhAv91Headers,

@@ -461,7 +461,7 @@ func yhInsSearch(slot, kw string) ([]interface{}, error) {
 func init() {
 	registerSite("yh_ins", &siteImpl{
 		Key:        "yh_ins",
-		Name:       "🔞INS社区",
+		Name:       "INS社区",
 		DefaultCat: "121",
 		HomeURL:    "https://nkwaey.top/",
 		Categories: yhInsCategories,

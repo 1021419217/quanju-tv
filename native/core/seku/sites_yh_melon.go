@@ -464,7 +464,7 @@ func yhMelonSearch(slot, kw string) ([]interface{}, error) {
 func init() {
 	registerSite("yh_melon", &siteImpl{
 		Key:        "yh_melon",
-		Name:       "🔞melon",
+		Name:       "melon",
 		DefaultCat: "ch:0",
 		HomeURL:    yhMelonBase + "/",
 		Categories: yhMelonCategories,

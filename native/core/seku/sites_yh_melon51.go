@@ -502,7 +502,7 @@ func yhMelon51CoverFetch(u string) ([]byte, error) {
 func init() {
 	registerSite(yhMelon51Slot, &siteImpl{
 		Key:        yhMelon51Slot,
-		Name:       "🔞51西瓜",
+		Name:       "51西瓜",
 		DefaultCat: "mid:0",
 		HomeURL:    yhMelon51Base + "/",
 		Headers:    yhMelon51Headers,

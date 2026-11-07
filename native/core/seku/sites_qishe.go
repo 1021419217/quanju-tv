@@ -3,7 +3,7 @@ package seku
 // ---- QiShe (妻社, user-called 人妻社) — cloudfront slot, v4 ----
 //
 // Ported from the user's ZakaTV jar class ZakaQiSheAmns (config key
-// ZakaQiShe, brand "🔞 妻社"). The config has no entry literally named
+// ZakaQiShe, brand " 妻社"). The config has no entry literally named
 // 人妻社; QiShe is the wife-community forum the user's list refers to
 // (same Discuz qsts_app plugin API, wife-swapping boards). Cloudfront's
 // previous occupant Pektino was removed by user order after the v3
@@ -308,7 +308,7 @@ func qsSearch(slot, kw string) ([]interface{}, error) {
 func init() {
 	registerSite("cloudfront", &siteImpl{
 		Key:        "qishe",
-		Name:       "🔞妻社",
+		Name:       "妻社",
 		DefaultCat: "home",
 		HomeURL:    qsHost + "/",
 		Categories: qsCategories,

@@ -77,7 +77,7 @@ func yhSenlinRewriteItem(slot string, idx int, item interface{}) {
 
 func yhSenlinImpl() *siteImpl {
 	impl := &siteImpl{
-		Key: "yh_senlin", Name: "🔞森林资源", DefaultCat: "",
+		Key: "yh_senlin", Name: "森林资源", DefaultCat: "",
 		HomeURL: yhSenlinSources[0].cfg.Base + "/",
 		Headers: yhSenlinSources[0].cfg.headers,
 	}

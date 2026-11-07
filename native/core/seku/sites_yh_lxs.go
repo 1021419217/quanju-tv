@@ -547,7 +547,7 @@ func yhLxsSearch(slot, kw string) ([]interface{}, error) {
 func init() {
 	registerSite(yhLxsSlot, &siteImpl{
 		Key:        yhLxsSlot,
-		Name:       "🔞撸先生",
+		Name:       "撸先生",
 		DefaultCat: "",
 		HomeURL:    yhLxsBase + "/",
 		Headers:    yhLxsHeaders,

@@ -350,7 +350,7 @@ func init() {
 	// v5: 99jj swapped xingguo -> wuguo (user order 2026-10-23);
 	// xingguo now carries JavHD (registered in sites_g2.go).
 	registerSite("wuguo", &siteImpl{
-		Key: "jj99", Name: "🔞久久热", DefaultCat: "new", HomeURL: jjBase + "/",
+		Key: "jj99", Name: "久久热", DefaultCat: "new", HomeURL: jjBase + "/",
 		Categories: jjCategories,
 		Catalog:    jjCatalog,
 		Detail:     jjDetail,

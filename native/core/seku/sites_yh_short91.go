@@ -425,6 +425,16 @@ func yhShort91Resolve(slot, rawID string) (map[string]interface{}, error) {
 	if u == "" {
 		return nil, fmt.Errorf("yh_short91: no play url for %s", vid)
 	}
+	// 站点偶尔把广告位或占位文案塞进 playUrl（见过直接是 "fuck"），
+	// 不校验就会把这个字符串当播放地址交给播放器，界面上表现为
+	// 「解析成功但放不出来」。不是 http(s) 一律按取流失败处理。
+	if !strings.HasPrefix(u, "http://") && !strings.HasPrefix(u, "https://") {
+		short := []rune(u)
+		if len(short) > 40 {
+			short = short[:40]
+		}
+		return nil, fmt.Errorf("yh_short91: invalid play url %q", string(short))
+	}
 	format := "mp4"
 	if strings.Contains(u, ".m3u8") {
 		format = "m3u8"
@@ -509,7 +519,7 @@ func yhShort91CoverFetch(u string) ([]byte, error) {
 func init() {
 	registerSite(yhShort91Slot, &siteImpl{
 		Key:        yhShort91Slot,
-		Name:       "🔞91短视频",
+		Name:       "91短视频",
 		DefaultCat: "home:auth",
 		HomeURL:    yhShort91Base + "/",
 		Headers:    yhShort91Headers,

@@ -435,7 +435,7 @@ func yhHL365CoverFetch(u string) ([]byte, error) {
 func init() {
 	registerSite("yh_hl365", &siteImpl{
 		Key:        "yh_hl365",
-		Name:       "🔞黑料不打烊",
+		Name:       "黑料不打烊",
 		DefaultCat: "all",
 		HomeURL:    yhHL365Bases[0] + "/",
 		Categories: yhHL365Categories,

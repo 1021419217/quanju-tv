@@ -22,7 +22,7 @@ func Slots() []string { return allSlots() }
 // HasSlot reports whether a legacy slot is registered.
 func HasSlot(slot string) bool { return implForSlot(slot) != nil }
 
-// SiteName returns the provider's content name (may carry a 🔞 prefix).
+// SiteName returns the provider's content name.
 func SiteName(slot string) string {
 	if impl := implForSlot(slot); impl != nil {
 		return impl.Name
@@ -211,5 +211,8 @@ func Cover(slot, rawURL string) ([]byte, error) {
 // IsMarkerCategory reports the legacy marker id.
 func IsMarkerCategory(id string) bool { return id == markerCatID }
 
-// CleanName strips the adult-tag prefix used in provider names.
-func CleanName(name string) string { return strings.TrimPrefix(name, "🔞") }
+// CleanName strips legacy adult-tag prefixes from provider names.
+func CleanName(name string) string {
+	name = strings.TrimPrefix(name, "🔞")
+	return strings.TrimPrefix(name, "18+")
+}

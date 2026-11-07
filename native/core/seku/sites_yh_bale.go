@@ -417,7 +417,7 @@ func yhBaleSearch(slot, kw string) ([]interface{}, error) {
 func init() {
 	registerSite("yh_bale", &siteImpl{
 		Key:        "yh_bale",
-		Name:       "🔞把乐",
+		Name:       "把乐",
 		DefaultCat: "all",
 		HomeURL:    yhBaleBase + "/",
 		Categories: yhBaleCategories,

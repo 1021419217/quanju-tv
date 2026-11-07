@@ -605,7 +605,7 @@ func yhHGSearch(slot, kw string) ([]interface{}, error) {
 func init() {
 	registerSite("yh_huangguo", &siteImpl{
 		Key:        "yh_huangguo",
-		Name:       "🔞黄果",
+		Name:       "黄果",
 		DefaultCat: "",
 		HomeURL:    "https://xjtu.huxrzdjnv.cc/",
 		Categories: yhHGCategories,

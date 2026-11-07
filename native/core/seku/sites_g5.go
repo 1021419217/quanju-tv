@@ -582,7 +582,7 @@ func g5HSTVSearch(slot, kw string) ([]interface{}, error) {
 
 func g5HSTVImpl() *siteImpl {
 	return &siteImpl{
-		Key: "hstv", Name: "🔞HSTV", DefaultCat: "hot", HomeURL: "https://hstv.fun/",
+		Key: "hstv", Name: "HSTV", DefaultCat: "hot", HomeURL: "https://hstv.fun/",
 		Categories: func(slot string) []interface{} {
 			out := []interface{}{}
 			for _, c := range g5HSTVCats {
@@ -1208,7 +1208,7 @@ func g5OneSearch(slot, kw string) ([]interface{}, error) {
 
 func g5OneImpl() *siteImpl {
 	return &siteImpl{
-		Key: "one", Name: "🔞ONE一个", DefaultCat: "daily", HomeURL: "https://api.5urjzs.com/",
+		Key: "one", Name: "ONE一个", DefaultCat: "daily", HomeURL: "https://api.5urjzs.com/",
 		Categories: func(slot string) []interface{} {
 			out := []interface{}{}
 			for _, c := range g5OneCats {

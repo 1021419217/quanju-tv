@@ -15,7 +15,7 @@ func init() {
 	// supjav 已按用户 2026-10-24 二轮口径撤注册（fix1 接全壳免代后真机仍打不开）；
 	// 实现保留在 sites_g2.go 存档，TestSupjavSlotsUnregistered 锁定不得注册。
 	registerSite("javmenu", &siteImpl{
-		Key: "javmenu", Name: "🔞JavMenu", DefaultCat: "censored/online", HomeURL: jmHost + "/",
+		Key: "javmenu", Name: "JavMenu", DefaultCat: "censored/online", HomeURL: jmHost + "/",
 		Categories: func(slot string) []interface{} { return g1Categories(jmCats, slot) },
 		Catalog:    jmCatalog,
 		Detail:     jmDetail,
@@ -24,7 +24,7 @@ func init() {
 		Headers:    jmHeaders,
 	}, "javmenu")
 	registerSite("pektino", &siteImpl{
-		Key: "pektino", Name: "🔞Pektino", DefaultCat: "hot", HomeURL: pkHost + "/",
+		Key: "pektino", Name: "Pektino", DefaultCat: "hot", HomeURL: pkHost + "/",
 		Categories: pkCategories,
 		Catalog:    pkCatalog,
 		Detail:     pkDetail,
@@ -33,7 +33,7 @@ func init() {
 		Headers:    pkHeaders,
 	}, "pektino")
 	registerSite("xszav", &siteImpl{
-		Key: "xszav", Name: "🔞XSZAV", DefaultCat: "japanese", HomeURL: "https://cn.xsz-av.com/",
+		Key: "xszav", Name: "XSZAV", DefaultCat: "japanese", HomeURL: "https://cn.xsz-av.com/",
 		Categories: xsCategories,
 		Catalog:    xsCatalog,
 		Detail:     xsDetail,
@@ -42,7 +42,7 @@ func init() {
 		Headers:    xsHeaders,
 	}, "xszav")
 	registerSite("av123", &siteImpl{
-		Key: "123av", Name: "🔞123AV", DefaultCat: "new", HomeURL: av123Site + "/",
+		Key: "123av", Name: "123AV", DefaultCat: "new", HomeURL: av123Site + "/",
 		Categories: av123Categories,
 		Catalog:    av123Catalog,
 		Detail:     av123Detail,

@@ -55,7 +55,7 @@ func init() {
 	// stays compiled but unregistered (the ad diagnosis is archived in
 	// the v4 batch notes).
 	registerSite("ikanbot", &siteImpl{
-		Key: "xvideos", Name: "🔞XVideos", DefaultCat: "new", HomeURL: xvHost + "/",
+		Key: "xvideos", Name: "XVideos", DefaultCat: "new", HomeURL: xvHost + "/",
 		Categories: func(slot string) []interface{} { return g1Categories(xvCats, slot) },
 		Catalog:    xvCatalog,
 		Detail:     xvDetail,
@@ -64,7 +64,7 @@ func init() {
 		Headers:    xvHeaders,
 	}, "xvideos")
 	registerSite("huangju", &siteImpl{
-		Key: "91sanji", Name: "🔞91三级", DefaultCat: "category", HomeURL: sjHost + "/",
+		Key: "91sanji", Name: "91三级", DefaultCat: "category", HomeURL: sjHost + "/",
 		Categories: func(slot string) []interface{} { return g1Categories(sjCats, slot) },
 		Catalog:    sjCatalog,
 		Detail:     sjDetail,
@@ -73,8 +73,8 @@ func init() {
 		Headers:    sjHeaders,
 		CoverFetch: sjCoverFetch,
 	}, "91sanji", "91三级")
-	registerSite("huangguo-video", &siteImpl{
-		Key: "javmit", Name: "🔞JAVMIT", DefaultCat: "home", HomeURL: jmtHost + "/",
+	registerSite("v_javmit", &siteImpl{
+		Key: "javmit", Name: "JAVMIT", DefaultCat: "home", HomeURL: jmtHost + "/",
 		Categories: func(slot string) []interface{} { return g1Categories(jmtCats, slot) },
 		Catalog:    jmtCatalog,
 		Detail:     jmtDetail,

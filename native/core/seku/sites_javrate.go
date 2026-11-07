@@ -957,7 +957,7 @@ func jrSearch(slot, kw string) ([]interface{}, error) {
 
 func init() {
 	registerSite("faguo", &siteImpl{
-		Key: "javrate", Name: "🔞鉴赏师", DefaultCat: "/movie/new", HomeURL: jrSite + "/",
+		Key: "javrate", Name: "鉴赏师", DefaultCat: "/movie/new", HomeURL: jrSite + "/",
 		Categories: jrCategories,
 		Catalog:    jrCatalog,
 		Detail:     jrDetail,

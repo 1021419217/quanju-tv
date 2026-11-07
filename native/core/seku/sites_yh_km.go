@@ -386,7 +386,7 @@ func yhKMHeaders() map[string]string {
 func init() {
 	registerSite(yhKMSlot, &siteImpl{
 		Key:        yhKMSlot,
-		Name:       "🔞快猫",
+		Name:       "快猫",
 		DefaultCat: "new",
 		HomeURL:    "http://api.cheetah888.com/",
 		Headers:    yhKMHeaders,

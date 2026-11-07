@@ -577,7 +577,7 @@ func yhSex8Search(slot, kw string) ([]interface{}, error) {
 func init() {
 	registerSite("yh_sex8", &siteImpl{
 		Key:        "yh_sex8",
-		Name:       "🔞杏吧视频·夜杏有声",
+		Name:       "杏吧视频·夜杏有声",
 		DefaultCat: "video",
 		HomeURL:    yhSex8Base,
 		Categories: yhSex8Categories,

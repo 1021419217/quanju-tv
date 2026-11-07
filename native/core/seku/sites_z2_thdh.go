@@ -112,7 +112,10 @@ func z2ThdhCatalog(slot, category string, page int) ([]interface{}, int, bool, e
 	if err := json.Unmarshal(body, &resp); err != nil {
 		return nil, 0, false, fmt.Errorf("z2_thdh list json: %v", err)
 	}
-	if resp.Code != 0 {
+	// 站点 2026-11 起把成功码从 0 改成了 1，data.list 照常有内容。
+	// 只认 code==0 会把整站判成失败（体检里表现为「目录 0 · list code 1」），
+	// 因此以「有没有拿到列表」为准，code 只在列表为空时作为错误信息。
+	if resp.Code != 0 && len(resp.Data.List) == 0 {
 		return nil, 0, false, fmt.Errorf("z2_thdh list code %d", resp.Code)
 	}
 	items := []interface{}{}
@@ -217,7 +220,7 @@ func z2ThdhResolve(slot, rawID string) (map[string]interface{}, error) {
 
 func init() {
 	registerSite("z2_thdh", &siteImpl{
-		Key: "z2_thdh", Name: "🔞探花短视频", DefaultCat: "latest", HomeURL: z2ThdhHosts[0] + "/",
+		Key: "z2_thdh", Name: "探花短视频", DefaultCat: "latest", HomeURL: z2ThdhHosts[0] + "/",
 		Categories: z2ThdhCategories,
 		Catalog:    z2ThdhCatalog,
 		Detail:     z2ThdhDetail,

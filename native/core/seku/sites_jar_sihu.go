@@ -453,7 +453,7 @@ func sihuCoverFetch(u string) ([]byte, error) {
 
 func init() {
 	impl := &siteImpl{
-		Key: "sihu", Name: "🔞四虎", DefaultCat: "t:l", HomeURL: "https://www.4hu.tv/",
+		Key: "sihu", Name: "四虎", DefaultCat: "t:l", HomeURL: "https://www.4hu.tv/",
 		Headers:    sihuHeaders,
 		CoverFetch: sihuCoverFetch,
 	}

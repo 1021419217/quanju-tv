@@ -23,7 +23,7 @@ var javdbCats = []struct{ id, name string }{
 
 func init() {
 	registerSite(slotJavDB, &siteImpl{
-		Key: "javdb", Name: "🔞JavDB磁力", DefaultCat: "new", HomeURL: javdbHost + "/",
+		Key: "javdb", Name: "JavDB磁力", DefaultCat: "new", HomeURL: javdbHost + "/",
 		Categories: func(slot string) []interface{} {
 			out := []interface{}{}
 			for _, c := range javdbCats {

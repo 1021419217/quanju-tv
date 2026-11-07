@@ -554,7 +554,7 @@ func yhXJSearch(slot, kw string) ([]interface{}, error) {
 func init() {
 	registerSite(yhXJSlot, &siteImpl{
 		Key:        yhXJSlot,
-		Name:       "🔞香蕉视频",
+		Name:       "香蕉视频",
 		DefaultCat: "vod:recommend",
 		HomeURL:    "https://ios.bxguwen.com/", // 原默认域已注销，展示用当前可解析的入口
 		Headers:    yhXJHeaders,

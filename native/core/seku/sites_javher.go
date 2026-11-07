@@ -628,7 +628,7 @@ func javherResolve(slot, rawID string) (map[string]interface{}, error) {
 
 func init() {
 	registerSite("guanguo", &siteImpl{
-		Key: "javher", Name: "🔞JavHer", DefaultCat: "n|", HomeURL: javherHost + "/",
+		Key: "javher", Name: "JavHer", DefaultCat: "n|", HomeURL: javherHost + "/",
 		Categories: javherCategories,
 		Catalog:    javherCatalog,
 		Detail:     javherDetail,

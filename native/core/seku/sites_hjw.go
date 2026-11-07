@@ -320,7 +320,7 @@ func hjwSearch(slot, kw string) ([]interface{}, error) {
 
 func init() {
 	registerSite("hjw", &siteImpl{
-		Key: "hjw", Name: "🔞海角网", DefaultCat: "home", HomeURL: hjwSeeds[0],
+		Key: "hjw", Name: "海角网", DefaultCat: "home", HomeURL: hjwSeeds[0],
 		Categories: hjwCategories,
 		Catalog:    hjwCatalog,
 		Detail:     hjwDetail,

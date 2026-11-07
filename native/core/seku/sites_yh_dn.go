@@ -314,7 +314,7 @@ func yhDNSearch(slot, kw string) ([]interface{}, error) {
 func init() {
 	registerSite("yh_dn", &siteImpl{
 		Key:        "yh_dn",
-		Name:       "🔞豆奶",
+		Name:       "豆奶",
 		DefaultCat: "recommend",
 		HomeURL:    yhDNBase + "/",
 		Categories: yhDNCategories,

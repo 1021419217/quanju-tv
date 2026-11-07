@@ -3,7 +3,7 @@ package seku
 // ---- Javmap (javmap.com, 日本AV大全) — hanxiaoquan slot, v4 ----
 //
 // Ported from the user's ZakaTV jar class ZakaJavmapAmns (config key
-// ZakaJavmap, site name "🔞JAVMAP┃日本AV大全"). Hanxiaoquan's previous
+// ZakaJavmap, site name "JAVMAP┃日本AV大全"). Hanxiaoquan's previous
 // occupant JavMenu was removed by user order (2026-10-23 17:48): its
 // CDN stitches a 3-second foreign ad segment into the media playlist
 // ahead of the AES-encrypted feature, and the player looped on it.
@@ -510,7 +510,7 @@ func jmapSearch(slot, kw string) ([]interface{}, error) {
 func init() {
 	registerSite("hanxiaoquan", &siteImpl{
 		Key:        "javmap",
-		Name:       "🔞日本AV大全",
+		Name:       "日本AV大全",
 		DefaultCat: "h:home",
 		HomeURL:    jmapSite + "/",
 		Categories: jmapCategories,

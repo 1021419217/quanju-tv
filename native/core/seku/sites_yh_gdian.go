@@ -377,7 +377,7 @@ func yhGDianSearch(slot, kw string) ([]interface{}, error) {
 func init() {
 	registerSite("yh_gdian", &siteImpl{
 		Key:        "yh_gdian",
-		Name:       "🔞G点短视频",
+		Name:       "G点短视频",
 		DefaultCat: "latest",
 		HomeURL:    yhGDianBase + "/",
 		Categories: yhGDianCategories,

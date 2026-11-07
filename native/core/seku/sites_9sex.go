@@ -387,7 +387,7 @@ func nsHeaders() map[string]string {
 
 func init() {
 	registerSite("avbigplat", &siteImpl{
-		Key: "avbigplat", Name: "🔞AV大平台", DefaultCat: "all", HomeURL: nsDomains[0] + "/tw",
+		Key: "avbigplat", Name: "AV大平台", DefaultCat: "all", HomeURL: nsDomains[0] + "/tw",
 		Categories: nsCategories,
 		Catalog:    nsCatalog,
 		Detail:     nsDetail,

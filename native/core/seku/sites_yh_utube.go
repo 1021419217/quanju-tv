@@ -572,7 +572,7 @@ func yhUtubeCoverFetch(u string) ([]byte, error) {
 func init() {
 	registerSite(yhUtubeSlot, &siteImpl{
 		Key:        yhUtubeSlot,
-		Name:       "🔞utube",
+		Name:       "utube",
 		DefaultCat: "rec",
 		HomeURL:    yhUtubeBase + "/",
 		Headers:    yhUtubeHeaders,

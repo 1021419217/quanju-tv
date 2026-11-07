@@ -369,7 +369,7 @@ func yhKMPicHeaders() map[string]string {
 func init() {
 	registerSite(yhKMPicSlot, &siteImpl{
 		Key:        yhKMPicSlot,
-		Name:       "🔞快猫图片",
+		Name:       "快猫图片",
 		DefaultCat: "1099910",
 		HomeURL:    yhKMPicBase + "/",
 		Headers:    yhKMPicHeaders,

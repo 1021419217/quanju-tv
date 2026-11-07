@@ -236,7 +236,7 @@ type yhBiliVariant struct {
 var yhBiliVariants = map[string]*yhBiliVariant{
 	yhBiliSlot: {
 		slot:       yhBiliSlot,
-		name:       "🔞逼哩",
+		name:       "逼哩",
 		base:       "https://d1qc43c8txyadm.cloudfront.net/",
 		hmacKey:    "jR6dO6fT1yD9zY7u",
 		xUA:        "DevType=Apple iPhone mobile;SysType=light;Ver=2.1.2;BuildID=Mobile Safari 18.5",

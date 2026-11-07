@@ -1287,7 +1287,7 @@ func oneHeaders() map[string]string {
 
 func init() {
 	registerSite("heguo", &siteImpl{
-		Key: "one", Name: "🔞一个ONE", DefaultCat: "video", HomeURL: oneEntryHosts[0],
+		Key: "one", Name: "一个ONE", DefaultCat: "video", HomeURL: oneEntryHosts[0],
 		Categories: oneCategories,
 		Catalog:    oneCatalog,
 		Detail:     oneDetail,

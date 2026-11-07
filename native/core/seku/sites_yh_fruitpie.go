@@ -728,7 +728,7 @@ func yhFPSearch(slot, kw string) ([]interface{}, error) {
 func init() {
 	registerSite("yh_fruitpie", &siteImpl{
 		Key:        "yh_fruitpie",
-		Name:       "🔞水果派",
+		Name:       "水果派",
 		DefaultCat: "video",
 		HomeURL:    yhFPBases[0] + "/",
 		Categories: yhFPCategories,

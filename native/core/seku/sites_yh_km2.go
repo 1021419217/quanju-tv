@@ -475,7 +475,7 @@ func yhKM2Headers() map[string]string {
 func init() {
 	registerSite(yhKM2Slot, &siteImpl{
 		Key:        yhKM2Slot,
-		Name:       "🔞新快猫",
+		Name:       "新快猫",
 		DefaultCat: "3",
 		HomeURL:    "http://app.newkm-azuercdn.com/",
 		Headers:    yhKM2Headers,

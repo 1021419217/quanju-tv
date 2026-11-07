@@ -292,13 +292,13 @@ func aoxxResolve(slot, rawID string) (map[string]interface{}, error) {
 }
 
 func init() {
-	av520 := htmlProfileImpl("520av", "🔞520AV影城", av520Profile)
+	av520 := htmlProfileImpl("520av", "520AV影城", av520Profile)
 	av520.Catalog = av520Catalog
 	av520.Detail = av520Detail
 	av520.Resolve = av520Resolve
 	av520.Search = av520Search
 	registerSite("av520", av520, "520av")
-	aoxx := htmlProfileImpl("aoxx69", "🔞AOXX69", aoxxProfile)
+	aoxx := htmlProfileImpl("aoxx69", "AOXX69", aoxxProfile)
 	aoxx.Resolve = aoxxResolve
 	registerSite("aoxx69", aoxx, "aoxx69")
 }

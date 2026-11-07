@@ -32,7 +32,7 @@ import (
 
 func init() {
 	registerSite("maoguo", &siteImpl{
-		Key: "51xz", Name: "🔞51X", DefaultCat: "x视频", HomeURL: xzHost + "/",
+		Key: "51xz", Name: "51X", DefaultCat: "x视频", HomeURL: xzHost + "/",
 		Categories: func(slot string) []interface{} {
 			out := []interface{}{}
 			for _, n := range xzCats {
@@ -54,8 +54,8 @@ func init() {
 	// during the v4 audit (unverified suspect): the py source's
 	// playerContent sends ONLY a User-Agent header, while pkResolve
 	// adds Referer=pektino.com/ via playResult.
-	registerSite("huangguoai", &siteImpl{
-		Key: "vjav", Name: "🔞VJAV", DefaultCat: "latest", HomeURL: vjHost + "/",
+	registerSite("v_vjav", &siteImpl{
+		Key: "vjav", Name: "VJAV", DefaultCat: "latest", HomeURL: vjHost + "/",
 		Categories: vjCategories,
 		Catalog:    vjCatalog,
 		Detail:     vjDetail,

@@ -292,10 +292,10 @@ func jackPlayResult(slot, rawID, referer, u string) map[string]interface{} {
 }
 
 func init() {
-	jack := htmlProfileImpl("jack20", "🔞後宮電影院", jackProfile)
+	jack := htmlProfileImpl("jack20", "後宮電影院", jackProfile)
 	jack.Resolve = jackResolve
 	registerSite("jack20", jack, "jack20", "20jack")
-	guru := htmlProfileImpl("javguru", "🔞JavGuru", guruProfile)
+	guru := htmlProfileImpl("javguru", "JavGuru", guruProfile)
 	guru.Resolve = guruResolve
 	registerSite("javguru", guru, "javguru", "jav.guru")
 }

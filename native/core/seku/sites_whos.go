@@ -695,7 +695,7 @@ func whosSearch(slot, kw string) ([]interface{}, error) {
 
 func init() {
 	registerSite("huangdou", &siteImpl{
-		Key: "whos", Name: "🔞whos识图", DefaultCat: "vid", HomeURL: whosSite + "/",
+		Key: "whos", Name: "whos识图", DefaultCat: "vid", HomeURL: whosSite + "/",
 		Categories: whosCategories,
 		Catalog:    whosCatalog,
 		Detail:     whosDetail,

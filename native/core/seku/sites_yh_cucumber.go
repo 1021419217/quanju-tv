@@ -1190,7 +1190,7 @@ func yhCucumberHeaders() map[string]string {
 func init() {
 	registerSite(yhCucumberSlot, &siteImpl{
 		Key:        yhCucumberSlot,
-		Name:       "🔞黄瓜视频",
+		Name:       "黄瓜视频",
 		DefaultCat: "choice",
 		HomeURL:    yhCucumberBases[0] + "/",
 		Headers:    yhCucumberHeaders,

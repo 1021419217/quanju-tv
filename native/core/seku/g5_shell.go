@@ -402,7 +402,7 @@ func g5YuuhcCoverFetch(u string) ([]byte, error) {
 
 func g5YuuhcImpl() *siteImpl {
 	return &siteImpl{
-		Key: "yuuhc", Name: "🔞欲含春", DefaultCat: g5YuuhcCats[0].id, HomeURL: g5YuuhcHosts[0] + "/",
+		Key: "yuuhc", Name: "欲含春", DefaultCat: g5YuuhcCats[0].id, HomeURL: g5YuuhcHosts[0] + "/",
 		Categories: func(slot string) []interface{} {
 			out := []interface{}{}
 			for _, c := range g5YuuhcCats {
@@ -1071,7 +1071,7 @@ func g5SetangCoverFetch(u string) ([]byte, error) {
 
 func g5SetangImpl() *siteImpl {
 	return &siteImpl{
-		Key: "setang", Name: "🔞6996色堂", DefaultCat: "18", HomeURL: g5SetangHosts[0] + "/",
+		Key: "setang", Name: "6996色堂", DefaultCat: "18", HomeURL: g5SetangHosts[0] + "/",
 		Categories: func(slot string) []interface{} {
 			out := []interface{}{}
 			for _, c := range g5SetangCats {

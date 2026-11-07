@@ -597,7 +597,10 @@ func hjDeriveKey(playlistURL, playlistText string) ([]byte, error) {
 }
 
 // hjExpandPreview turns a truncated preview playlist into a full
-// local playlist file + key file and returns the file:// URL.
+// local playlist file + key file, then serves them from the loopback
+// stream server. file:// is deliberately avoided: iOS AVPlayer refuses
+// to load a local HLS playlist, which made 海角 look "resolved but
+// unplayable" on device.
 func hjExpandPreview(previewURL string) (string, error) {
 	text, code, err := hjFetchText(previewURL)
 	if err != nil || code != 200 || !strings.Contains(text, "#EXTM3U") {
@@ -668,6 +671,11 @@ func hjExpandPreview(previewURL string) (string, error) {
 	if err := os.WriteFile(plPath, []byte(pl), 0o644); err != nil {
 		return "", err
 	}
+	if u, err := localStreamURL(name + ".m3u8"); err == nil {
+		return u, nil
+	}
+	// 极少数环境绑不上 loopback（例如被系统策略拦），退回原路径，
+	// 桌面端仍能播，手机上至少不会毫无线索。
 	return "file://" + plPath, nil
 }
 
@@ -773,7 +781,7 @@ func hjCoverFetch(u string) ([]byte, error) {
 
 func init() {
 	registerSite("fanguo", &siteImpl{
-		Key: "haijiao", Name: "🔞海角社区", DefaultCat: "new", HomeURL: "https://haijiao.com/",
+		Key: "haijiao", Name: "海角社区", DefaultCat: "new", HomeURL: "https://haijiao.com/",
 		Categories: hjCategories,
 		Catalog:    hjCatalog,
 		Detail:     hjDetail,

@@ -3,7 +3,7 @@ package seku
 // ---- MissAV 镜像·免代理 (thisav.my -> missav06.net) — hongguo, v4 ----
 //
 // Ported from the user's ZakaTV jar class ZakaMirrorAmns (config key
-// ZakaMirror "🔞MissAV镜像┃免代理", ext host https://www.thisav.my).
+// ZakaMirror "MissAV镜像┃免代理", ext host https://www.thisav.my).
 // User order 2026-10-23 17:48: hongguo tries this mirror first — same
 // MissAV catalogue as the (CF-blocked) official site, but reachable
 // without a proxy; 123AV (sites_123av.go) is the documented fallback
@@ -423,7 +423,7 @@ func mirrorSearch(slot, kw string) ([]interface{}, error) {
 
 func init() {
 	registerSite("hongguo", &siteImpl{
-		Key: "mirror", Name: "🔞MissAV镜像", DefaultCat: "release", HomeURL: mirrorSeedHost + "/",
+		Key: "mirror", Name: "MissAV镜像", DefaultCat: "release", HomeURL: mirrorSeedHost + "/",
 		Categories: mirrorCategories,
 		Catalog:    mirrorCatalog,
 		Detail:     mirrorDetail,

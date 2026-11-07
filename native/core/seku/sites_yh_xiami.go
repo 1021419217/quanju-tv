@@ -642,7 +642,7 @@ func yhXiamiSearch(slot, kw string) ([]interface{}, error) {
 func init() {
 	registerSite("yh_xiami", &siteImpl{
 		Key:        "yh_xiami",
-		Name:       "🔞虾米",
+		Name:       "虾米",
 		DefaultCat: "home",
 		HomeURL:    yhXiamiBase + "/",
 		Categories: yhXiamiCategories,

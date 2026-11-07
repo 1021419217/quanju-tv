@@ -78,7 +78,7 @@ func pgSortOf(cat string) string {
 
 func pgImpl() *siteImpl {
 	impl := &siteImpl{
-		Key: "pigav", Name: "🔞PIGAV", DefaultCat: "latest", HomeURL: pgBase + "/",
+		Key: "pigav", Name: "PIGAV", DefaultCat: "latest", HomeURL: pgBase + "/",
 		Headers: pgHeaders,
 	}
 	impl.Categories = func(slot string) []interface{} {

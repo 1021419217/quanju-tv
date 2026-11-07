@@ -2038,7 +2038,7 @@ func init() {
 	// replaced by 99jj 久久热, registered in sites_v2.go). The yt*
 	// provider functions stay in this file, unregistered.
 	registerSite("wangguo", &siteImpl{
-		Key: "javxu", Name: "🔞JavXu", DefaultCat: "home", HomeURL: jxHost + "/zh/",
+		Key: "javxu", Name: "JavXu", DefaultCat: "home", HomeURL: jxHost + "/zh/",
 		Categories: jxCategories,
 		Catalog:    jxCatalog,
 		Detail:     jxDetail,

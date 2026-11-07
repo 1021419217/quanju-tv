@@ -589,7 +589,7 @@ func dsdSearch(slot, kw string) ([]interface{}, error) {
 
 func init() {
 	registerSite("dsd", &siteImpl{
-		Key: "dsd", Name: "🔞懂色帝", DefaultCat: "1", HomeURL: "https://www.dsd.com.se/",
+		Key: "dsd", Name: "懂色帝", DefaultCat: "1", HomeURL: "https://www.dsd.com.se/",
 		Categories: dsdCategories,
 		Catalog:    dsdCatalog,
 		Detail:     dsdDetail,

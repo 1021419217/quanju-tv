@@ -259,7 +259,7 @@ var dartSlotNames = map[string]string{
 	"hongguo": "红果", "ikanbot": "爱看机器人", "a123": "A123",
 	"hanxiaoquan": "韩小圈", "guipian": "鬼片", "huangdou": "黄豆",
 	"huangju": "剧果", "yeguo": "野果", "dsd": "帝果",
-	"huangguo-video": "黄果视频", "huangguoai": "黄果 AI",
+	"v_javmit": "JAVMIT", "v_vjav": "VJAV",
 	"cloudfront": "黄果旧版", "yaguo": "芽果", "maoguo": "猫果",
 	"fanguo": "饭果", "guanguo": "观果", "heguo": "河果",
 	"xingguo": "星果", "huaguo": "花果", "niuguo": "牛果",
@@ -394,7 +394,7 @@ func providerCategories(slot string) []interface{} {
 	if out == nil {
 		return []interface{}{}
 	}
-	marker := categoryObj(markerCatID, "全部·"+strings.TrimPrefix(impl.Name, "🔞"))
+	marker := categoryObj(markerCatID, "全部·"+impl.Name)
 	return append([]interface{}{marker}, out...)
 }
 

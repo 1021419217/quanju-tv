@@ -646,7 +646,7 @@ func yhHaijiaoCoverFetch(u string) ([]byte, error) {
 func init() {
 	registerSite("yh_haijiao", &siteImpl{
 		Key:        "yh_haijiao",
-		Name:       "🔞海角社区",
+		Name:       "海角社区",
 		DefaultCat: "video:1",
 		HomeURL:    yhHaijiaoBase + "/",
 		Categories: yhHaijiaoCategories,

@@ -261,7 +261,7 @@ func yhPron91Search(slot, kw string) ([]interface{}, error) {
 func init() {
 	registerSite(yhPron91Slot, &siteImpl{
 		Key:        yhPron91Slot,
-		Name:       "🔞91pron",
+		Name:       "91pron",
 		DefaultCat: "rf",
 		HomeURL:    yhPron91Base + "/",
 		Headers:    yhPron91Headers,

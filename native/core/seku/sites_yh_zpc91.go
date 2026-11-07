@@ -487,7 +487,7 @@ func yhZpc91CoverFetch(u string) ([]byte, error) {
 func init() {
 	registerSite(yhZpc91Slot, &siteImpl{
 		Key:        yhZpc91Slot,
-		Name:       "🔞zpc91",
+		Name:       "zpc91",
 		DefaultCat: "construct:1",
 		HomeURL:    yhZpc91Base + "/",
 		Headers:    yhZpc91Headers,

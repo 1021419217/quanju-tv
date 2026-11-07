@@ -2952,7 +2952,7 @@ func init() {
 	// the jar's whos.tv, registered in sites_whos.go). The supjav*
 	// functions stay above, unregistered.
 	registerSite("yaguo", &siteImpl{
-		Key: "aipornx", Name: "🔞AiPorn", DefaultCat: "home", HomeURL: "https://www.aipornx.cc/",
+		Key: "aipornx", Name: "AiPorn", DefaultCat: "home", HomeURL: "https://www.aipornx.cc/",
 		Categories: aipCategories,
 		Catalog:    aipCatalog,
 		Detail:     aipDetail,
@@ -2965,7 +2965,7 @@ func init() {
 	// v5: JavHD swapped wuguo -> xingguo (user order 2026-10-23);
 	// wuguo now carries 久久热 99jj (registered in sites_v2.go).
 	registerSite("xingguo", &siteImpl{
-		Key: "javhd", Name: "🔞JavHD", DefaultCat: "/cn/recent/", HomeURL: "https://javhd.today/",
+		Key: "javhd", Name: "JavHD", DefaultCat: "/cn/recent/", HomeURL: "https://javhd.today/",
 		Categories: javhdCategories,
 		Catalog:    javhdCatalog,
 		Detail:     javhdDetail,

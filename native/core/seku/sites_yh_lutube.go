@@ -615,7 +615,7 @@ func yhLutubeSearch(slot, kw string) ([]interface{}, error) {
 func init() {
 	registerSite(yhLutubeSlot, &siteImpl{
 		Key:        yhLutubeSlot,
-		Name:       "🔞撸Tube",
+		Name:       "撸Tube",
 		DefaultCat: "menu:13:long",
 		HomeURL:    yhLutubeDefaultAPI + "/",
 		Headers:    yhLutubeHeaders,
