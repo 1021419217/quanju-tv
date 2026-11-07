@@ -128,10 +128,10 @@ var yhSex8IV = []byte("1234567890123456")
 
 func yhSex8Headers() map[string]string {
 	return map[string]string{
-		"User-Agent":   yhSex8UA,
-		"APPIMAGE":     "100",
-		"VERSIONNAME":  "1.0.0",
-		"Accept":       "application/json, text/plain, */*",
+		"User-Agent":      yhSex8UA,
+		"APPIMAGE":        "100",
+		"VERSIONNAME":     "1.0.0",
+		"Accept":          "application/json, text/plain, */*",
 		"Accept-Language": "zh-CN,zh;q=0.9",
 	}
 }
@@ -177,46 +177,70 @@ func yhSex8Radio(params map[string]interface{}) (map[string]interface{}, error) 
 	form := url.Values{"request": {yhSex8Enc(string(jb))}}.Encode()
 	h := yhSex8Headers()
 	h["Content-Type"] = "application/x-www-form-urlencoded"
-	raw, code, _, err := httpDo("POST", fmt.Sprintf("%s?0=%d", yhSex8RadioURL, time.Now().UnixMilli()), strings.NewReader(form), h)
-	if err != nil {
-		return nil, err
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		if attempt > 0 {
+			time.Sleep(300 * time.Millisecond)
+		}
+		raw, code, _, err := httpDo("POST", fmt.Sprintf("%s?0=%d", yhSex8RadioURL, time.Now().UnixMilli()), strings.NewReader(form), h)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if code != 200 {
+			lastErr = fmt.Errorf("yh_sex8 radio http %d", code)
+			continue
+		}
+		var obj map[string]interface{}
+		if err := json.Unmarshal([]byte(yhSex8Dec(raw)), &obj); err != nil {
+			lastErr = fmt.Errorf("yh_sex8 radio parse: %v", err)
+			continue
+		}
+		if st := g5StrVal(obj["status"]); st != "" && st != "1" {
+			// 业务错误不重试，直接返回。
+			return nil, fmt.Errorf("yh_sex8 radio status %s: %s", st, g5StrVal(obj["msg"]))
+		}
+		return obj, nil
 	}
-	if code != 200 {
-		return nil, fmt.Errorf("yh_sex8 radio http %d", code)
-	}
-	var obj map[string]interface{}
-	if err := json.Unmarshal([]byte(yhSex8Dec(raw)), &obj); err != nil {
-		return nil, fmt.Errorf("yh_sex8 radio parse: %v", err)
-	}
-	if st := g5StrVal(obj["status"]); st != "" && st != "1" {
-		return nil, fmt.Errorf("yh_sex8 radio status %s: %s", st, g5StrVal(obj["msg"]))
-	}
-	return obj, nil
+	return nil, lastErr
 }
 
 func yhSex8VideoList() ([]map[string]interface{}, error) {
-	b, code, _, err := httpGet(yhSex8Base+"v1/video/index/free/data", yhSex8Headers())
-	if err != nil {
-		return nil, err
-	}
-	if code != 200 {
-		return nil, fmt.Errorf("yh_sex8 video http %d", code)
-	}
-	var obj map[string]interface{}
-	if err := json.Unmarshal([]byte(yhSex8Dec(b)), &obj); err != nil {
-		return nil, fmt.Errorf("yh_sex8 video parse: %v", err)
-	}
-	data := yhMap(obj["data"])
-	if data == nil {
-		return nil, fmt.Errorf("yh_sex8 video empty data")
-	}
-	out := []map[string]interface{}{}
-	for _, e := range yhArr(data["models"]) {
-		if m := yhMap(e); m != nil {
-			out = append(out, m)
+	// 主域偶发 502/短时抖动（API 路径通常正常）。重试 2 次，避免用户
+	// 一点进站源就看到「暂时无法加载」。
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		if attempt > 0 {
+			time.Sleep(300 * time.Millisecond)
 		}
+		b, code, _, err := httpGet(yhSex8Base+"v1/video/index/free/data", yhSex8Headers())
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if code != 200 {
+			lastErr = fmt.Errorf("yh_sex8 video http %d", code)
+			continue
+		}
+		var obj map[string]interface{}
+		if err := json.Unmarshal([]byte(yhSex8Dec(b)), &obj); err != nil {
+			lastErr = fmt.Errorf("yh_sex8 video parse: %v", err)
+			continue
+		}
+		data := yhMap(obj["data"])
+		if data == nil {
+			lastErr = fmt.Errorf("yh_sex8 video empty data")
+			continue
+		}
+		out := []map[string]interface{}{}
+		for _, e := range yhArr(data["models"]) {
+			if m := yhMap(e); m != nil {
+				out = append(out, m)
+			}
+		}
+		return out, nil
 	}
-	return out, nil
+	return nil, lastErr
 }
 
 var yhSex8VideoCache sync.Map // tid -> model
