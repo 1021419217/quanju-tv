@@ -53,15 +53,19 @@ package seku
 //   且令牌自举路径未活体校准，待可用出口/真机嗅探后补验。
 
 import (
+	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
 	"sync"
+	"time"
 )
 
 const yhInsBase = "http://kakzpm.ins164.com:29909"
@@ -72,8 +76,29 @@ var yhInsIV = []byte("G+KbPeShVmYq3t6v")
 
 var yhInsTokMu sync.Mutex
 var yhInsToken string
-var yhInsPlayPrefix = "https://ins.m3.66buks.top"
+var yhInsTokenAt time.Time
+var yhInsPlayPrefix = "https://ins.m3.f6ecxan.top"
+var yhInsCoverPrefix = "https://ins.imgs.bukxwv.top"
 var yhInsPrefixMu sync.Mutex
+
+func yhInsCoverPrefixURL() string {
+	yhInsPrefixMu.Lock()
+	defer yhInsPrefixMu.Unlock()
+	return yhInsCoverPrefix
+}
+
+// yhInsAbsCoverURL 把列表/详情返回的 /test/TEMP/... 相对封面路径拼成
+// 图片域绝对地址；已是 http(s) 的原样返回。
+func yhInsAbsCoverURL(u string) string {
+	if u == "" || strings.HasPrefix(u, "http") {
+		return u
+	}
+	prefix := yhInsCoverPrefixURL()
+	if strings.HasPrefix(u, "/") {
+		return prefix + u
+	}
+	return prefix + "/" + u
+}
 
 func yhInsPlayPrefixURL() string {
 	yhInsPrefixMu.Lock()
@@ -92,12 +117,15 @@ func yhInsAbsPlayURL(u string) string {
 	return prefix + "/" + u
 }
 
-func yhInsDomainPrefix(obj map[string]interface{}) string {
+// yhInsDomainPrefix 按 domain 端点的 type 取域：type=1 为播放域(m3u8)，
+// type=3 为图片域(封面)。接口字段名是 name（旧实现读 domain/url/host/
+// value 全落空，导致播放域一直沿用写死的失效旧域）。
+func yhInsDomainPrefix(obj map[string]interface{}, wantType int) string {
 	get := func(m map[string]interface{}) string {
 		if m == nil {
 			return ""
 		}
-		for _, k := range []string{"domain", "url", "host", "value"} {
+		for _, k := range []string{"name", "domain", "url", "host", "value"} {
 			if s := g5StrVal(m[k]); s != "" {
 				if !strings.HasPrefix(s, "http") {
 					s = "https://" + strings.TrimPrefix(s, "/")
@@ -110,22 +138,22 @@ func yhInsDomainPrefix(obj map[string]interface{}) string {
 		}
 		return ""
 	}
-	isType1 := func(m map[string]interface{}) bool {
+	isType := func(m map[string]interface{}) bool {
 		if m == nil {
 			return false
 		}
-		if v, ok := g5MapInt(m, "type"); ok && v == 1 {
+		if v, ok := g5MapInt(m, "type"); ok && v == wantType {
 			return true
 		}
-		return g5StrVal(m["type"]) == "1"
+		return g5StrVal(m["type"]) == fmt.Sprintf("%d", wantType)
 	}
 	if dm := yhMap(obj["data"]); dm != nil {
-		if isType1(dm) {
+		if isType(dm) {
 			return get(dm)
 		}
 	}
 	for _, e := range yhArr(obj["data"]) {
-		if m := yhMap(e); m != nil && isType1(m) {
+		if m := yhMap(e); m != nil && isType(m) {
 			if s := get(m); s != "" {
 				return s
 			}
@@ -218,69 +246,137 @@ func yhInsCall(path string, plain bool) (map[string]interface{}, http.Header, er
 	return obj, hdr, nil
 }
 
-// yhInsBootstrap：尝试自举 guest 令牌（公开端点 + visit 探针）。
+// yhInsEncrypt 复刻 H5 的 sm()：AES/CBC/PKCS7，密钥与 IV 同响应解密，
+// 输出标准 Base64。POST 请求体统一包成 {"post-data": <密文>}。
+func yhInsEncrypt(plain []byte) string {
+	block, err := aes.NewCipher(yhInsKey)
+	if err != nil || len(yhInsIV) != aes.BlockSize {
+		return ""
+	}
+	pad := aes.BlockSize - len(plain)%aes.BlockSize
+	buf := make([]byte, len(plain)+pad)
+	copy(buf, plain)
+	for i := len(plain); i < len(buf); i++ {
+		buf[i] = byte(pad)
+	}
+	out := make([]byte, len(buf))
+	cipher.NewCBCEncrypter(block, yhInsIV).CryptBlocks(out, buf)
+	return base64.StdEncoding.EncodeToString(out)
+}
+
+// yhInsPost 走 H5 的加密 POST：请求体 {"post-data": sm(json)}，
+// 响应 data 为加密串时用同一密钥解密，返回解密后的 JSON 对象。
+func yhInsPost(path string, payload map[string]interface{}) (map[string]interface{}, error) {
+	jb, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	body := fmt.Sprintf(`{"post-data":%q}`, yhInsEncrypt(jb))
+	h := yhInsHeaders()
+	h["Content-Type"] = "application/json"
+	raw, code, _, err := httpDo("POST", yhInsBase+path, bytes.NewReader([]byte(body)), h)
+	if err != nil {
+		return nil, err
+	}
+	if code != 200 {
+		return nil, fmt.Errorf("yh_ins post http %d for %s", code, path)
+	}
+	var obj map[string]interface{}
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return nil, fmt.Errorf("yh_ins post parse: %v", err)
+	}
+	if s, ok := obj["data"].(string); ok && s != "" {
+		dec, derr := yhInsDecrypt(s)
+		if derr != nil {
+			return nil, derr
+		}
+		var inner map[string]interface{}
+		if err := json.Unmarshal(dec, &inner); err != nil {
+			return nil, fmt.Errorf("yh_ins post decrypt parse: %v", err)
+		}
+		// 内层信封形如 {"code":"00000","data":{...}}，取出 data。
+		if dm := yhMap(inner["data"]); dm != nil {
+			return dm, nil
+		}
+		return inner, nil
+	}
+	if dm := yhMap(obj["data"]); dm != nil {
+		return dm, nil
+	}
+	return obj, nil
+}
+
+func yhInsVisitorID() string {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return fmt.Sprintf("%d", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(b)
+}
+
+// yhInsBootstrap：按 H5 登录链路自举 guest 令牌。
+//  1. POST /auth/app/public/visitor {code: <指纹>, sourceType: 3}
+//     -> 服务端签发临时账号 {userName, passWord}
+//  2. POST /auth/app/public/login {username, password, loginType: "3"}
+//     -> {access_token}（JWT），之后所有请求作为 Authorization 头。
+//
+// 令牌存活期内复用；公开端点另外刷新播放域前缀。
 func yhInsBootstrap() string {
 	yhInsTokMu.Lock()
-	if yhInsToken != "" {
+	if yhInsToken != "" && time.Since(yhInsTokenAt) < 30*time.Minute {
 		t := yhInsToken
 		yhInsTokMu.Unlock()
 		return t
 	}
 	yhInsTokMu.Unlock()
-	try := func(obj map[string]interface{}, hdr http.Header) string {
-		for _, k := range []string{"token", "authorization", "Authorization", "accessToken", "authToken"} {
-			if s := g5StrVal(obj[k]); s != "" {
-				return s
-			}
+
+	// 公开 getGeneral 会下发 h5Domain/resourceDomain；domain 端点给出
+	// type=1 的播放域，顺手刷新前缀，不影响令牌自举结果。
+	if obj, _, err := yhInsCall("/party/common/domain/private/domain", true); err == nil {
+		play := yhInsDomainPrefix(obj, 1)
+		cover := yhInsDomainPrefix(obj, 3)
+		yhInsPrefixMu.Lock()
+		if play != "" {
+			yhInsPlayPrefix = play
 		}
-		if d := yhMap(obj["data"]); d != nil {
-			for _, k := range []string{"token", "authorization", "Authorization", "accessToken", "authToken"} {
-				if s := g5StrVal(d[k]); s != "" {
-					return s
-				}
-			}
+		if cover != "" {
+			yhInsCoverPrefix = cover
 		}
-		if r := yhMap(obj["response"]); r != nil {
-			for _, k := range []string{"token", "authorization", "Authorization", "accessToken", "authToken"} {
-				if s := g5StrVal(r[k]); s != "" {
-					return s
-				}
-			}
-		}
-		if hdr != nil {
-			if s := hdr.Get("Authorization"); s != "" {
-				return s
-			}
-		}
+		yhInsPrefixMu.Unlock()
+	}
+
+	acct, err := yhInsPost("/auth/app/public/visitor", map[string]interface{}{
+		"code": yhInsVisitorID(), "sourceType": 3,
+	})
+	if err != nil {
 		return ""
 	}
-	for _, p := range []string{"/party/common/generals/public/getGeneral", "/party/common/domain/private/domain", "/user/app/u/visit"} {
-		obj, hdr, err := yhInsCall(p, strings.Contains(p, "generals") || strings.Contains(p, "domain"))
-		if err != nil || obj == nil {
-			continue
-		}
-		if strings.Contains(p, "domain") {
-			if prefix := yhInsDomainPrefix(obj); prefix != "" {
-				yhInsPrefixMu.Lock()
-				yhInsPlayPrefix = prefix
-				yhInsPrefixMu.Unlock()
-			}
-		}
-		if t := try(obj, hdr); t != "" {
-			yhInsTokMu.Lock()
-			yhInsToken = t
-			yhInsTokMu.Unlock()
-			return t
-		}
+	user, pass := g5StrVal(acct["userName"]), g5StrVal(acct["passWord"])
+	if user == "" || pass == "" {
+		return ""
 	}
-	return ""
+	login, err := yhInsPost("/auth/app/public/login", map[string]interface{}{
+		"username": user, "password": pass, "loginType": "3",
+	})
+	if err != nil {
+		return ""
+	}
+	tok := g5StrVal(login["access_token"])
+	if tok == "" {
+		return ""
+	}
+	yhInsTokMu.Lock()
+	yhInsToken = tok
+	yhInsTokenAt = time.Now()
+	yhInsTokMu.Unlock()
+	return tok
 }
 
 func yhInsAuth() (string, error) {
 	if t := yhInsBootstrap(); t != "" {
 		return t, nil
 	}
-	return "", fmt.Errorf("yh_ins: no guest Authorization token (App sniffs it from H5 requests; bootstrap uncalibrated)")
+	return "", fmt.Errorf("yh_ins: 访客登录失败，无法获取令牌")
 }
 
 func yhInsPlayURL(rec map[string]interface{}) string {
@@ -310,7 +406,7 @@ func yhInsCover(rec map[string]interface{}) string {
 			continue
 		}
 		if c := g5StrVal(fm["coverUrl"]); c != "" {
-			return c
+			return yhInsAbsCoverURL(c)
 		}
 	}
 	return ""

@@ -40,8 +40,10 @@ package seku
 //   封面魔数：同上，出口未验。
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/url"
 	"regexp"
 	"strconv"
@@ -49,7 +51,10 @@ import (
 	"sync"
 )
 
-var yhGDianBase = "https://g3d37na.com"
+// g3d39by.com 是 2026-11 实测的当前内容域（/apiv2/video/search 返回正常
+// JSON）。壳页 g3d37na.com 只负责跳转，直接以其为基址会拿到 HTML 导致
+// parse 失败。校准仍会在遇到壳页时刷新为最新域。
+var yhGDianBase = "https://g3d39by.com"
 var yhGDianBaseMu sync.Mutex
 
 func yhGDianBaseURL() string {
@@ -73,6 +78,55 @@ var yhGDianRedirectRe = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)location\.href\s*=\s*["']([^"']+)["']`),
 	regexp.MustCompile(`(?i)window\.location\s*=\s*["']([^"']+)["']`),
 	regexp.MustCompile(`(?i)<meta[^>]*http-equiv=["']?refresh["']?[^>]*content=["'][^"']*url=([^"'\s>]+)`),
+}
+
+// 新版 Loading 壳页把跳转目标藏在 window.atob("<base64>") 里，再拼
+// "/?u=<b64(origin)>&p=<b64(path)>" 由 <a> 标签点击触发；目标域会 302
+// 到真正的内容域。旧正则只认 location.href=，永远匹配不到，导致
+// "base not calibrated"。这里复刻该链路，拿到 302 的 Location 作为基址。
+var yhGDianAtobRe = regexp.MustCompile(`(?i)atob\(\s*["']([A-Za-z0-9+/=]+)["']\s*\)`)
+
+func yhGDianShellRedirect(page, cur string) string {
+	m := yhGDianAtobRe.FindStringSubmatch(page)
+	if m == nil {
+		return ""
+	}
+	dec, err := base64.StdEncoding.DecodeString(m[1])
+	if err != nil {
+		return ""
+	}
+	target := strings.TrimSpace(string(dec))
+	if !strings.HasPrefix(target, "http") {
+		return ""
+	}
+	u, err := url.Parse(cur)
+	if err != nil {
+		return ""
+	}
+	origin := u.Scheme + "://" + u.Host
+	jump := strings.TrimSuffix(target, "/") + "/?u=" +
+		url.QueryEscape(base64.StdEncoding.EncodeToString([]byte(origin))) +
+		"&p=" + url.QueryEscape(base64.StdEncoding.EncodeToString([]byte("/")))
+	req, err := http.NewRequest("GET", jump, nil)
+	if err != nil {
+		return ""
+	}
+	for k, v := range yhGDianHeaders() {
+		req.Header.Set(k, v)
+	}
+	resp, err := noRedirectClient.Do(req)
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+	loc := resp.Header.Get("Location")
+	if loc == "" {
+		return ""
+	}
+	if lu, err := url.Parse(loc); err == nil && lu.Host != "" && (lu.Scheme == "http" || lu.Scheme == "https") {
+		return lu.Scheme + "://" + lu.Host
+	}
+	return ""
 }
 
 func yhGDianCalibratedBase(u *url.URL) string {
@@ -99,6 +153,12 @@ func yhGDianCalibrate() bool {
 		page := string(body)
 		cur := yhGDianBaseURL()
 		advanced := false
+		// 新版壳页：atob 跳转链优先（旧正则认不出这种形式）。
+		if final := yhGDianShellRedirect(page, cur); final != "" {
+			if yhGDianSetBase(final) {
+				return true
+			}
+		}
 		for _, re := range yhGDianRedirectRe {
 			m := re.FindStringSubmatch(page)
 			if m == nil {
@@ -129,6 +189,7 @@ func yhGDianCalibrate() bool {
 	}
 	return changed
 }
+
 const yhGDianUA = "Mozilla/5.0 (Linux; Android 8.0.0; SM-G955U Build/R16NW) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/87.0.4280.141 Mobile Safari/537.36 Edg/106.0.0.0"
 
 func yhGDianHeaders() map[string]string {
@@ -349,7 +410,9 @@ func yhGDianResolve(slot, rawID string) (map[string]interface{}, error) {
 		if !strings.HasPrefix(u, "http") {
 			u = yhGDianBaseURL() + u
 		}
-		u = strings.Replace(u, "/play?", "/play.m3u8?", 1)
+		// 旧版配方把 /play? 改成 /play.m3u8?；实测当前站点该路径已 404，
+		// 原始 /play?...&movie.m3u8 才返回合法 m3u8（含 AES-128 key）。
+		// 不再做路径替换，直接用服务端下发的地址。
 		if strings.Contains(u, "baidu.com") {
 			continue
 		}
