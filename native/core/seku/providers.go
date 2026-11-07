@@ -1,6 +1,7 @@
 package seku
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net"
@@ -11,17 +12,29 @@ import (
 	"time"
 )
 
+// sekuDialer 优先 IPv4：不少源站域名会被解析出 2a03:2880::/32 的假 IPv6（污染），
+// 双栈拨号先试 v6 会一直等到超时，表现成「这个源打不开」。先拨 tcp4，
+// 域名只有 AAAA 记录时立刻失败再回退，不额外耗时。
+var sekuDialer = &net.Dialer{
+	Timeout:   10 * time.Second,
+	KeepAlive: 30 * time.Second,
+}
+
+func sekuDial(ctx context.Context, network, address string) (net.Conn, error) {
+	if conn, err := sekuDialer.DialContext(ctx, "tcp4", address); err == nil {
+		return conn, nil
+	}
+	return sekuDialer.DialContext(ctx, network, address)
+}
+
 // sharedTransport 是 seku 引擎所有请求共用的连接池。
 // Go 默认 Transport 的 MaxIdleConnsPerHost 只有 2：一个源站首屏要同时取
 // 十几张海报/封面，超出的连接用完即关，下一张又要重新 DNS+TLS 握手，
 // 表现就是「海报一张一张慢慢冒」「切分类要等一两秒」。这里放宽到 16 条并
 // 延长空闲保持时间，让同一站源的突发请求真正复用已建立的连接。
 var sharedTransport = &http.Transport{
-	Proxy: http.ProxyFromEnvironment,
-	DialContext: (&net.Dialer{
-		Timeout:   10 * time.Second,
-		KeepAlive: 30 * time.Second,
-	}).DialContext,
+	Proxy:                 http.ProxyFromEnvironment,
+	DialContext:           sekuDial,
 	ForceAttemptHTTP2:     true,
 	MaxIdleConns:          256,
 	MaxIdleConnsPerHost:   16,

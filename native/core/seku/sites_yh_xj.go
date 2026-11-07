@@ -556,7 +556,7 @@ func init() {
 		Key:        yhXJSlot,
 		Name:       "🔞香蕉视频",
 		DefaultCat: "vod:recommend",
-		HomeURL:    yhXJDefaultBase + "/",
+		HomeURL:    "https://ios.bxguwen.com/", // 原默认域已注销，展示用当前可解析的入口
 		Headers:    yhXJHeaders,
 		Categories: yhXJCategories,
 		Catalog:    yhXJCatalog,

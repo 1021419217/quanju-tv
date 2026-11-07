@@ -61,11 +61,13 @@ import (
 // ---- constants (py source values, verbatim) ----
 
 var oneEntryHosts = []string{
+	// 前两个当前实测可用，放最前；后三个域名已注销（NXDOMAIN），
+	// 留在末尾只为原样保留上游清单，避免每次启动都先撞三遍空。
+	"https://api.phplhr.com/",
+	"https://api.5urjzs.com/",
 	"https://api.mgzsua.com/",
 	"https://api.h52ft6.com/",
 	"https://api.xeajfv.com/",
-	"https://api.phplhr.com/",
-	"https://api.5urjzs.com/",
 }
 
 const (

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -39,19 +40,19 @@ type Config struct {
 	GuipianURL       string
 	HanxiaoquanURL   string
 	// FanqieURL 是番茄内容引擎（本机 loopback REST）地址，留空用默认 127.0.0.1:18921。
-	FanqieURL    string
-	XChinaURL    string
-	ThepornyURL  string
-	JinguoURL    string
+	FanqieURL       string
+	XChinaURL       string
+	ThepornyURL     string
+	JinguoURL       string
 	JinguoDuanjuURL string
-	HeitaoURL    string
-	Token        string
-	AESKeyHex    string
-	InterfaceKey string
-	ParamKey     string
-	ParamIV      string
-	APIBase      string
-	CDNURL       string
+	HeitaoURL       string
+	Token           string
+	AESKeyHex       string
+	InterfaceKey    string
+	ParamKey        string
+	ParamIV         string
+	APIBase         string
+	CDNURL          string
 }
 
 type Downloader struct {
@@ -99,26 +100,26 @@ type Downloader struct {
 func defaultConfig() Config { return Config{MaxPagesPerSort: 50, PageSize: 30, Retries: 2} }
 
 type nativeDrama struct {
-	MetadataSchema int      `json:"metadataSchema"`
-	ID             string   `json:"id"`
-	Source         string   `json:"source"`
-	SourceID       string   `json:"sourceId"`
-	Title          string   `json:"title"`
-	Description    string   `json:"description"`
-	Cover          string   `json:"cover"`
-	Episodes       int      `json:"episodes"`
-	Category       string   `json:"category"`
-	VIP            *bool    `json:"vip"`
-	Heat           string   `json:"heat,omitempty"`
-	Views          string   `json:"views,omitempty"`
-	OnlineDate     string   `json:"onlineDate,omitempty"`
-	Tags           []string `json:"tags,omitempty"`
-	Kind           string   `json:"kind,omitempty"`
-	FolderID       string   `json:"folderId,omitempty"`
-	Backdrop       string   `json:"backdrop,omitempty"`
-	Stills         []string `json:"stills,omitempty"`
+	MetadataSchema int           `json:"metadataSchema"`
+	ID             string        `json:"id"`
+	Source         string        `json:"source"`
+	SourceID       string        `json:"sourceId"`
+	Title          string        `json:"title"`
+	Description    string        `json:"description"`
+	Cover          string        `json:"cover"`
+	Episodes       int           `json:"episodes"`
+	Category       string        `json:"category"`
+	VIP            *bool         `json:"vip"`
+	Heat           string        `json:"heat,omitempty"`
+	Views          string        `json:"views,omitempty"`
+	OnlineDate     string        `json:"onlineDate,omitempty"`
+	Tags           []string      `json:"tags,omitempty"`
+	Kind           string        `json:"kind,omitempty"`
+	FolderID       string        `json:"folderId,omitempty"`
+	Backdrop       string        `json:"backdrop,omitempty"`
+	Stills         []string      `json:"stills,omitempty"`
 	Related        []nativeDrama `json:"related,omitempty"`
-	ReleaseStatus  string   `json:"releaseStatus,omitempty"`
+	ReleaseStatus  string        `json:"releaseStatus,omitempty"`
 	// Peers 在跨源聚合搜索里带上其它站源的同一部剧，供界面一键切换播放源。
 	Peers []nativeDrama `json:"peers,omitempty"`
 }
@@ -317,6 +318,16 @@ func newNativeEngine(directory string) (*nativeEngine, error) {
 	// 长时间占着并发槽位，表现成整页卡住。
 	transport.ResponseHeaderTimeout = 12 * time.Second
 	transport.Proxy = router.proxy
+	// 优先走 IPv4。部分站源域名被解析出 2a03:2880::/32 的假 IPv6（污染），
+	// 系统默认双栈拨号会先试 v6，白白等到超时再回落，表现成「打开要转十几秒」。
+	// 这里先拨 tcp4；域名只有 AAAA 时立刻失败并回退原 network，不额外拖时间。
+	baseDialer := &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
+	transport.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
+		if conn, err := baseDialer.DialContext(ctx, "tcp4", address); err == nil {
+			return conn, nil
+		}
+		return baseDialer.DialContext(ctx, network, address)
+	}
 	cdn := newCDNTransport(transport, newDNSResolver(transport))
 	// 浏览器指纹传输必须留住引用：自定义源新增/读取时要把自己的 host 登记进
 	// 白名单（registerCustomBrowserHost），这里不赋值的话白名单永远是空的，
