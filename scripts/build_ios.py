@@ -124,7 +124,7 @@ def main():
             shutil.copy2(package, destination)
             artifacts.append(destination)
     else:
-        run([flutter, 'build', 'ios', '--release', '--no-codesign', '--no-pub', '--verbose', *variant.flutter_arguments])
+        run([flutter, 'build', 'ios', '--release', '--no-codesign', '--no-pub', *variant.flutter_arguments])
         application = root / 'build' / 'ios' / 'iphoneos' / 'Runner.app'
         validate_unsigned_application(application)
         symbols = subprocess.check_output(['xcrun', 'nm', '-gU', str(application / 'Runner')], text=True)
