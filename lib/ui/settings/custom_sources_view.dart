@@ -439,20 +439,13 @@ class _CustomSourceEditorState extends State<_CustomSourceEditor> {
   late final _rule = TextEditingController(text: widget.existing?.rule ?? '');
   bool _ruleMode = false;
   bool _busy = false;
-  bool _analyzing = false;
   String? _error;
-  List<String> _analysisNotes = const [];
-  String? _analysisSummary;
   late String _kind = widget.existing?.kind ?? '';
 
   @override
   void initState() {
     super.initState();
     _ruleMode = widget.existing?.hasRule ?? false;
-    // 网址一变化就刷新「自动识别」按钮的可用状态。
-    _base.addListener(() {
-      if (mounted) setState(() {});
-    });
   }
 
   @override
@@ -470,30 +463,9 @@ class _CustomSourceEditorState extends State<_CustomSourceEditor> {
       setState(() => _error = '粘贴规则 JSON 后再保存，或关闭规则开关');
       return;
     }
-    final rawBase = _base.text.trim();
-    if (!_ruleMode && rawBase.isEmpty) {
+    if (!_ruleMode && _base.text.trim().isEmpty) {
       setState(() => _error = '请填写源网址');
       return;
-    }
-    // Go 核心要求完整 http(s) 地址；浏览器复制有时只有域名，补齐协议再存，
-    // 并写回输入框让用户看到实际保存的地址。
-    var base = rawBase;
-    if (base.isNotEmpty && !base.contains('://')) {
-      base = 'https://$base';
-      _base.text = base;
-    }
-    // Go 核心要求源名称必填。自动识别失败时不会生成规则、也不会回填站名，
-    // 若这里不兜底，用户「只粘网址 → 点保存」会被后端拒绝，表现为按钮闪一下
-    // 却存不进去。名称留空时从网址域名补一个，保证普通网页源也能保存；
-    // 规则模式下后端会从规则「主页url」补名，这里不硬拦。
-    var name = _name.text.trim();
-    if (name.isEmpty && base.isNotEmpty) {
-      final uri = Uri.tryParse(base);
-      final host = (uri?.host ?? '').replaceFirst(RegExp(r'^www\.'), '');
-      if (host.isNotEmpty) {
-        name = host;
-        _name.text = name;
-      }
     }
     setState(() {
       _busy = true;
@@ -503,16 +475,16 @@ class _CustomSourceEditorState extends State<_CustomSourceEditor> {
       final existing = widget.existing;
       if (existing == null) {
         await widget.repository.addCustomSource(
-          name: name,
-          base: base,
+          name: _name.text.trim(),
+          base: _base.text.trim(),
           rule: rule,
           kind: _kind,
         );
       } else {
         await widget.repository.updateCustomSource(
           existing.id,
-          name: name,
-          base: base,
+          name: _name.text.trim(),
+          base: _base.text.trim(),
           rule: rule,
           kind: _kind,
         );
@@ -531,73 +503,6 @@ class _CustomSourceEditorState extends State<_CustomSourceEditor> {
     }
   }
 
-  /// 抓取站点网页 HTML，让 Go 核心反推分类 / 列表 / 搜索 / 详情 / 播放规则并回填表单。
-  /// 这里只填表，不写盘；用户看过规则后仍需点「保存」才真正新增自定义源。
-  Future<void> _analyze() async {
-    if (_busy) return;
-    final base = _base.text.trim();
-    if (base.isEmpty) {
-      setState(() => _error = '请先填写源网址再自动识别');
-      return;
-    }
-    setState(() {
-      _busy = true;
-      _analyzing = true;
-      _error = null;
-      _analysisNotes = const [];
-      _analysisSummary = null;
-    });
-    try {
-      final result = await widget.repository.analyzeCustomSourceSite(base);
-      final rule = (result['rule'] as String? ?? '').trim();
-      final notes = (result['notes'] as List? ?? const [])
-          .whereType<String>()
-          .where((line) => line.isNotEmpty)
-          .toList();
-      final catalogs = (result['catalogs'] as num?)?.toInt() ?? 0;
-      final episodes = (result['episodes'] as num?)?.toInt() ?? 0;
-      final kind = (result['kind'] as String? ?? '').trim();
-      if (!mounted) return;
-      setState(() {
-        _analysisNotes = notes;
-        if (rule.isNotEmpty) {
-          _rule.text = rule;
-          _ruleMode = true;
-          if (_name.text.trim().isEmpty) {
-            _name.text = (result['name'] as String? ?? '').trim();
-          }
-          // 识别成功即代表规则已在引擎里实测跑通，明确标成网页源，
-          // 免得保存后还去探测标准 JSON 接口白白拖慢首次加载。
-          if (kind.isNotEmpty) _kind = kind;
-          _analysisSummary = catalogs > 0
-              ? '引擎实测：目录取到 $catalogs 部'
-                  '${episodes > 0 ? '、详情页取到 $episodes 集' : '（详情页未实测到分集）'}'
-                  '。规则已回填，可直接保存，也可在下方微调后保存；想换站识别，直接改上面的网址再点一次。'
-              : '已生成规则，但引擎实测未能完成（分类页抓取失败或超时）：规则未经实测验证，保存后请自行确认能否取到内容。想换站识别，直接改上面的网址再点一次。';
-        } else {
-          // 识别不出规则也要把站名带回来：Go 侧名称必填，且让用户看到这次
-          // 识别至少拿到了站点标识，而不是一片空白。
-          if (_name.text.trim().isEmpty) {
-            _name.text = (result['name'] as String? ?? '').trim();
-          }
-          _analysisSummary =
-              '未能识别出可用规则：引擎实测取不到内容或站点是动态渲染。已保留为普通网页源，'
-              '源名称已按网址自动补齐，可直接点「保存」（引擎会自动适配 MacCMS 站点）；'
-              '若该站并非 MacCMS，保存后可能仍取不到内容，可手动粘贴规则。具体原因见下方诊断。';
-        }
-      });
-    } catch (error) {
-      if (mounted) setState(() => _error = '自动识别失败：$error');
-    } finally {
-      if (mounted) {
-        setState(() {
-          _busy = false;
-          _analyzing = false;
-        });
-      }
-    }
-  }
-
   @override
   Widget build(BuildContext context) => AlertDialog(
     title: Text(widget.existing == null ? '新增自定义源' : '编辑自定义源'),
@@ -608,26 +513,6 @@ class _CustomSourceEditorState extends State<_CustomSourceEditor> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // 校验/后端错误放在最上方：以前排在滚动区最底部，保存失败时
-            // 用户只看见按钮闪一下，根本不知道是「源名称必填」之类的原因。
-            if (_error case final error?)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 10),
-                child: Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.errorContainer,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Text(
-                    error,
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.onErrorContainer,
-                    ),
-                  ),
-                ),
-              ),
             TextField(
               controller: _name,
               enabled: !_busy,
@@ -641,9 +526,7 @@ class _CustomSourceEditorState extends State<_CustomSourceEditor> {
             const SizedBox(height: 12),
             TextField(
               controller: _base,
-              // 识别成功后会自动切到规则模式，但网址框不能跟着变灰：
-              // 用户要换一个站识别时，直接改这里再点一次即可，不必先去关规则开关。
-              enabled: !_busy,
+              enabled: !_busy && !_ruleMode,
               keyboardType: TextInputType.url,
               textInputAction: TextInputAction.next,
               autocorrect: false,
@@ -651,30 +534,12 @@ class _CustomSourceEditorState extends State<_CustomSourceEditor> {
                 labelText: '源网址',
                 hintText: 'https://example.com',
                 helperText: _ruleMode
-                    ? '规则模式下取流以规则「主页url」为准；改这里的网址再点识别，可直接换站重新生成规则。'
-                    : '填好网址后点「自动识别规则」，会抓取网页 HTML 并用引擎实测能否取到内容。',
+                    ? '规则模式下自动取规则「主页url」'
+                    : '支持符合 MacCMS 规范的站点，自动适配目录、搜索与播放。',
                 helperMaxLines: 3,
               ),
             ),
-            Align(
-              alignment: Alignment.centerRight,
-              child: FilledButton.tonalIcon(
-                onPressed: _busy || _base.text.trim().isEmpty ? null : _analyze,
-                icon: _analyzing
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.auto_fix_high_rounded, size: 18),
-                label: Text(_analyzing ? '识别中…' : '自动识别规则'),
-              ),
-            ),
-            const SizedBox(height: 8),
             DropdownButtonFormField<String>(
-              // 自动识别会把源类型回填成 web；initialValue 只在 initState 读一次，
-              // 加 key 让回填后下拉框重建显示新值，避免显示与实际保存值不一致。
-              key: ValueKey(_kind),
               initialValue: _kind,
               decoration: const InputDecoration(
                 labelText: '源类型',
@@ -725,37 +590,12 @@ class _CustomSourceEditorState extends State<_CustomSourceEditor> {
                   ),
                 ),
               ),
-            if (_analysisSummary case final summary?)
+            if (_error case final error?)
               Padding(
-                padding: const EdgeInsets.only(top: 10),
-                child: Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-                  decoration: BoxDecoration(
-                    border: Border.all(color: Theme.of(context).dividerColor),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        summary,
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                      if (_analysisNotes.isNotEmpty) ...[
-                        const SizedBox(height: 6),
-                        for (final note in _analysisNotes.take(10))
-                          Padding(
-                            padding: const EdgeInsets.only(top: 2),
-                            child: Text(
-                              '• $note',
-                              style: Theme.of(context).textTheme.bodySmall,
-                            ),
-                          ),
-                      ],
-                    ],
-                  ),
+                padding: const EdgeInsets.only(top: 12),
+                child: Text(
+                  error,
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
                 ),
               ),
           ],
