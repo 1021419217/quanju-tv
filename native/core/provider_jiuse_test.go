@@ -155,11 +155,16 @@ func TestJiusePlaylistUsable(t *testing.T) {
 }
 
 func TestJiuseCatalogAddress(t *testing.T) {
-	if got := jiuseCatalogAddress(1, "", ""); got != "https://91porny.com/video/index" {
-		t.Fatalf("首页地址不对：%s", got)
+	// 「全部」不再走 /video/index：那是「最近更新」的 VIP 新片池，实测整页 1002。
+	// 改走收藏最多，翻到第 5 页仍全部可播。
+	if got := jiuseCatalogAddress(1, "", ""); got != "https://91porny.com/video/category/most-favorite" {
+		t.Fatalf("默认目录地址不对：%s", got)
 	}
-	if got := jiuseCatalogAddress(2, "", ""); got != "https://91porny.com/video/index?page=2" {
+	if got := jiuseCatalogAddress(2, "", ""); got != "https://91porny.com/video/category/most-favorite?page=2" {
 		t.Fatalf("列表分页地址不对：%s", got)
+	}
+	if got := jiuseCatalogAddress(1, "top-list", ""); got != "https://91porny.com/video/category/top-list" {
+		t.Fatalf("分类地址不对：%s", got)
 	}
 	if got := jiuseCatalogAddress(1, "", "巨乳"); got != "https://91porny.com/search?keywords=%E5%B7%A8%E4%B9%B3" {
 		t.Fatalf("搜索地址不对：%s", got)
@@ -186,8 +191,14 @@ func TestJiuseCategoryValidation(t *testing.T) {
 	if !validJiuseCategory("") || !validJiuseCategory("  ") {
 		t.Fatal("「全部」应合法")
 	}
-	// 站内没有自拍题材分类，任何非空分类都要拒掉，避免点开一个空列表。
-	if validJiuseCategory("chinese") || validJiuseCategory("not-a-category") {
-		t.Fatal("非空分类应被拒")
+	if !validJiuseCategory("most-favorite") || !validJiuseCategory("top-list") {
+		t.Fatal("登记过的可播分类应合法")
+	}
+	// latest / hot-list / ori / nonpaid / long-list 这些分类实测整池 1002，
+	// 已经从列表里摘掉，传进来必须拒掉，避免又挂出一个全死的入口。
+	for _, dead := range []string{"latest", "hot-list", "ori", "nonpaid", "long-list", "chinese", "not-a-category"} {
+		if validJiuseCategory(dead) {
+			t.Fatalf("%s 是死分类，应被拒", dead)
+		}
 	}
 }

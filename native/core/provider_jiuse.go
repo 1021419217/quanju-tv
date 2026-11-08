@@ -40,10 +40,49 @@ const (
 	jiusePlayMinSegments = 3
 )
 
-// 站内没有「自拍题材」分类：/videos 与 /videos/categories/* 是另一套日本 AV
-// 库（/videos/view/{数字}/{slug}/），和本站源的 91 内容不是一回事，挂上去只会
-// 点开全空。所以分类只保留「全部」，目录走 /video/index。
-var jiuseCategories = []nativeCategory{}
+// 分类：只保留 2026-11 实测**能播**的入口。
+//
+// 九色把片子分成两个池子，用同一个 CDN：
+//
+//	免费老片池 → 播放列表正常（几十到几百个分片）
+//	VIP 新片池 → 一律 x-video-notice: 1002，四条线路、换 Referer、换指纹都一样
+//
+// 实测（每个入口抽 3 部，逐部取播放列表）：
+//
+//	收藏最多 most-favorite      3/3   翻到 p5 仍 3/3
+//	本月收藏 top-favorite        3/3
+//	本月讨论 month-discuss       3/3
+//	本月最热 top-list            3/3
+//	上月最热 top-last            3/3
+//	最近得分 recent-rating       1/3
+//	最近更新 latest              0/3   ← 首页挂的就是它，所以首页"全部放不了"
+//	当前最热 hot-list            0/3
+//	91原创 ori                   0/3
+//	高清 hd                      0/3
+//	非付费 nonpaid               0/3
+//	10分钟以上 long-list         0/3
+//	20分钟以上 longer-list       0/3
+//	最近加精 recent-favorite     0/3
+//
+// 「非付费」这个名字是幌子，里面照样是 VIP 片，别再被它骗。挂全死分类只会
+// 让用户点开一片红，所以这里不挂。
+//
+// 注意别挂 /videos/categories/*：那是站内另一套日本 AV 库，和 91 内容无关，
+// 点开会全空。91 内容的分类只在 /video/category/ 下。
+var jiuseCategories = []nativeCategory{
+	{ID: "most-favorite", Name: "收藏最多"},
+	{ID: "top-favorite", Name: "本月收藏"},
+	{ID: "month-discuss", Name: "本月讨论"},
+	{ID: "top-list", Name: "本月最热"},
+	{ID: "top-last", Name: "上月最热"},
+	{ID: "recent-rating", Name: "最近得分"},
+}
+
+// jiuseDefaultCategory 是「全部」实际走的分类。
+//
+// 站内没有真正意义上的"全量且免费"列表：/video/index 是最近更新，整整一池
+// VIP；而收藏最多是免费老片，翻到第 5 页仍然全部可播，是目前最好的默认入口。
+const jiuseDefaultCategory = "most-favorite"
 
 var (
 	reJiuseCardStart = regexp.MustCompile(`<div class="colVideoList`)
@@ -78,9 +117,18 @@ func validJiuseID(id string) bool {
 	return true
 }
 
-// validJiuseCategory 只认「全部」：站点没有可用的自拍题材分类（见上面注释）。
+// validJiuseCategory 只认上面登记过的分类 slug（空字符串是「全部」）。
 func validJiuseCategory(category string) bool {
-	return strings.TrimSpace(category) == ""
+	category = strings.TrimSpace(category)
+	if category == "" {
+		return true
+	}
+	for _, entry := range jiuseCategories {
+		if entry.ID == category {
+			return true
+		}
+	}
+	return false
 }
 
 func jiuseCategoryName(category string) string {
@@ -186,9 +234,14 @@ func jiuseCatalogAddress(page int, category, query string) string {
 		}
 		return address
 	}
-	// /video/index 是站内唯一的「自拍」全量列表（/videos 与 /videos/categories/*
-	// 是另一套日本 AV 库，路径是 /videos/view/{数字}/{slug}/，与本站源无关）。
-	path := "/video/index"
+	// /video/index 是站内 91 内容的全量列表；分类页在 /video/category/{slug}。
+	// （/videos 与 /videos/categories/* 是另一套日本 AV 库，路径 /videos/view/{数字}/{slug}/，
+	// 与本站源无关，挂上去只会点开全空。）
+	category = strings.TrimSpace(category)
+	if category == "" {
+		category = jiuseDefaultCategory
+	}
+	path := "/video/category/" + url.PathEscape(category)
 	if page > 1 {
 		path += "?page=" + strconv.Itoa(page)
 	}
@@ -290,7 +343,9 @@ func parseJiuseDetail(pageText, sourceID string) (Drama, []Chapter, error) {
 	} else if match := reJiuseCardAuthPlain.FindStringSubmatch(pageText); match != nil {
 		author = p91CleanText(match[1])
 	}
-	drama := jiuseDrama(sourceID, title, cover, author, authorID, "", nil, strings.Count(pageText, "vip-layer") > 0)
+	// 详情页整页里会带上样式表与推荐位的 vip-layer，按整页判断必然误判成 VIP
+	// （每部片都会被标「高清」）。VIP 只由列表卡片决定，这里不再判定。
+	drama := jiuseDrama(sourceID, title, cover, author, authorID, "", nil, false)
 	if seconds := jiuseDurationSeconds(pageText); seconds > 0 {
 		drama.Duration = seconds
 	}
@@ -390,9 +445,10 @@ func (d *Downloader) resolveJiuseMedia(ctx context.Context, task Task) (provider
 	}
 	pageURL := jiuseBaseURL + "/video/view/" + sourceID
 
-	// 换线最多走四条，单次请求又有重试；给整段一个总预算，避免全挂时
-	// 让用户对着转圈等一两分钟。
-	budget, cancel := context.WithTimeout(ctx, 24*time.Second)
+	// 换线只在「这一条线路本身出问题」时才有意义（超时 / 详情页没给地址）。
+	// 1002 是片源级的：同一个视频四条线路回的都是同一份占位，换线纯属让用户
+	// 多等十几秒。所以 1002 直接判死并给出准确原因。
+	budget, cancel := context.WithTimeout(ctx, 12*time.Second)
 	defer cancel()
 
 	// 详情页已经带出地址：先用它，失败再按线路换。
@@ -427,7 +483,11 @@ func (d *Downloader) resolveJiuseMedia(ctx context.Context, task Task) (provider
 		}
 		playlist, finalURL, err := d.jiusePlaylist(budget, address, pageURL)
 		if err != nil {
-			reasons = append(reasons, jiuseLineLabel(line)+": "+publicError(err).Error())
+			reason := publicError(err).Error()
+			reasons = append(reasons, jiuseLineLabel(line)+": "+reason)
+			if strings.Contains(reason, "1002") {
+				return providerMedia{}, errors.New(jiuseVipHint)
+			}
 			continue
 		}
 		if finalURL == "" {
@@ -437,18 +497,17 @@ func (d *Downloader) resolveJiuseMedia(ctx context.Context, task Task) (provider
 			URL:      finalURL,
 			Playlist: playlist,
 			Referer:  pageURL,
-			credentials: &providerMediaCredentials{
-				referer:   pageURL,
-				userAgent: userAgent,
-			},
 		}, nil
 	}
 	if len(reasons) == 0 {
 		reasons = append(reasons, "没有可用的播放线路")
 	}
-	// 四条线全废时把每条的原因带上，用户截图就能直接定位是哪一环被挡。
 	return providerMedia{}, fmt.Errorf("九色取流失败：%s", strings.Join(reasons, "；"))
 }
+
+// jiuseVipHint 是 1002 的准确说法。写成「线路不可用」会让人以为是网络问题，
+// 实际上这部片对所有人都不可播（除非买会员），换成免费片才有用。
+const jiuseVipHint = "该片是九色 VIP 新片（1002），站方只给会员播放；请换「收藏最多 / 本月」分类里的免费片"
 
 var (
 	reJiuseOgTitle = regexp.MustCompile(`(?is)<meta property="og:title" content="([^"]*)"`)

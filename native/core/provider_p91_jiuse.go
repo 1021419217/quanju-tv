@@ -25,11 +25,26 @@ import (
 //
 // 九色自己也取不到时，原样退回 91 的旧逻辑，行为与 3.25 一致。
 
+// p91JiuseFallbackEnabled 控制 91 是否借九色取流。
+//
+// 2026-11 复测结论：九色并不是「全部 1002」，而是分池——免费老片池正常，
+// VIP 新片池才 1002（详见 provider_jiuse.go 的分类注释）。91 自己的 CDN 现在
+// 对 HTML5 播放器基本全线掐断（PROTOCOL_ERROR），而同一个 viewkey 在九色的
+// 免费池里能拿到正经 HLS，所以这条通道重新打开。
+const p91JiuseFallbackEnabled = true
+
+// p91JiuseFirst：91 直链先不试，直接走九色。
+//
+// 91 的直链失败率高到「十部九不播」，先试它等于每次先给用户一段转圈；
+// 九色失败只要 0.5~1 秒（1002 立刻判死），而且成功率高得多。等哪天 91 的
+// CDN 恢复，把这个常量改回 false 即可回到「直链优先」。
+var p91JiuseFirst = true
+
 const (
 	// p91JiuseFallbackWindow 是一次 91 播放失败后，降级到九色取流的持续时间。
 	p91JiuseFallbackWindow = 10 * time.Minute
 	// p91JiuseBudget 是借道九色的总预算：四条线路逐条试，整体不超过这个时间。
-	p91JiuseBudget = 14 * time.Second
+	p91JiuseBudget = 8 * time.Second
 	// p91JiuseBlockThreshold 是九色连续失败几次后熔断，避免每个视频都白等十几秒。
 	p91JiuseBlockThreshold = 3
 )
@@ -136,7 +151,12 @@ func (d *Downloader) p91JiuseMedia(ctx context.Context, viewkey string) (provide
 		}
 		playlist, finalURL, err := d.jiusePlaylist(budget, address, pageURL)
 		if err != nil {
-			reasons = append(reasons, jiuseLineLabel(line)+": "+publicError(err).Error())
+			reason := publicError(err).Error()
+			reasons = append(reasons, jiuseLineLabel(line)+": "+reason)
+			// 1002 是片源级限制，四条线路一样，换线只会让用户白等。
+			if strings.Contains(reason, "1002") {
+				break
+			}
 			continue
 		}
 		if finalURL == "" {

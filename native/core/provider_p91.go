@@ -1157,11 +1157,14 @@ func (d *Downloader) resolveP91Media(ctx context.Context, task Task) (providerMe
 	if sourceID == "" || strings.ContainsAny(sourceID, "/?#& ") {
 		return providerMedia{}, errors.New("91porn 播放请求缺少有效的视频 ID")
 	}
-	// 借九色取流（细节见 provider_p91_jiuse.go）。三种情况才走：
-	// 91 没给地址 / 地址签名全空 / 刚刚播失败过。
-	// 九色拿不到就继续走下面的 91 原逻辑，行为不变。
-	if !p91JiuseBlocked() {
-		needJiuse := len(candidates) == 0 || p91JiuseDegraded()
+	// 借九色取流（细节见 provider_p91_jiuse.go）。
+	//
+	// 2026-11 实测：91 自己的 CDN 对 HTML5 播放器几乎全线掐断（HTTP/2
+	// PROTOCOL_ERROR / EOF），而同一个 viewkey 在九色的免费老片池里能拿到正经
+	// HLS。所以默认先走九色（p91JiuseFirst），失败再回落到 91 直链——九色这边
+	// 1002 是秒判，代价只有半秒左右，比先转圈十几秒再失败划算得多。
+	if p91JiuseFallbackEnabled && !p91JiuseBlocked() {
+		needJiuse := p91JiuseFirst || len(candidates) == 0 || p91JiuseDegraded()
 		for _, candidate := range candidates {
 			if p91MediaSignatureMissing(candidate) {
 				needJiuse = true

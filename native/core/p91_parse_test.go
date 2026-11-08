@@ -441,6 +441,11 @@ func TestP91AuthorPageWellFallback(t *testing.T) {
 
 // 起播不再预探测：详情页已经带出地址时必须零网络请求直接返回。
 func TestP91ResolveReturnsDetailAddressInstantly(t *testing.T) {
+	// 这条测的是「不借九色时，详情页地址必须零请求直接用」。
+	// 线上默认 p91JiuseFirst=true（先走九色），这里关掉单独验证直链路径。
+	previous := p91JiuseFirst
+	p91JiuseFirst = false
+	defer func() { p91JiuseFirst = previous }()
 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
 	defer cancel()
 	d := &Downloader{}
