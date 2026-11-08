@@ -37,8 +37,10 @@ var (
 		ID   string
 		Name string
 	}{
+		// 只保留站方的真实内容分类。「5分钟+」「10分钟+」是按视频时长筛的，
+		// 不是内容分类，点进去和「最新视频」内容几乎一样，已下线（2026-11-08 用户反馈）。
 		{"recent", "最新视频"}, {"hot", "当前最热"}, {"week_hot", "周榜"}, {"month_hot", "月榜"},
-		{"high", "站长推荐"}, {"5mins", "5分钟+"}, {"10mins", "10分钟+"},
+		{"high", "站长推荐"},
 		{"c0", "国产视频"}, {"c1", "麻豆视频"}, {"c2", "91制片厂"}, {"c3", "玩偶姐姐"},
 		{"c4", "小鸟酱专题"}, {"c5", "糖心Vlog"}, {"c6", "天美传媒"}, {"c7", "蜜桃传媒"},
 		{"c8", "皇家华人"}, {"c9", "星空传媒"},
@@ -320,6 +322,11 @@ func validXChinaCategory(category string) bool {
 	category = strings.TrimSpace(category)
 	if category == "" {
 		return false
+	}
+	// 5mins / 10mins 已从分类栏下线，但接口仍支持：保留放行，
+	// 免得运行中残留的旧选中态切源回来时报「内容分类无效」。
+	if category == "5mins" || category == "10mins" {
+		return true
 	}
 	for _, entry := range xchinaCategoryEntries {
 		if entry.ID == category {
