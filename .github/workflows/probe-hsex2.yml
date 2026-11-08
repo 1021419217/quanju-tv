@@ -1,0 +1,35 @@
+name: Probe hsex detail
+
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Detail + playlist
+        run: |
+          set -x
+          UA="Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
+          curl -sS -m 30 -A "$UA" "https://hsex.icu/video-1257475.htm" -o d1.html -w "d1 http=%{http_code} bytes=%{size_download}\n"
+          echo "=== media hints"
+          grep -oE '(https?:)?//[^"'\''  ]*\.(m3u8|mp4)[^"'\''  ]*' d1.html | head -10
+          grep -oE 'source[^>]{0,200}' d1.html | head -10
+          grep -oE '(src|data-src|video_url|hls)["'\'']?\s*[:=]\s*["'\''][^"'\'']+' d1.html | head -10
+          echo "=== player block"
+          python3 - <<'PY'
+          import re
+          s=open('d1.html',encoding='utf-8',errors='ignore').read()
+          i=s.find('<video')
+          print(s[max(0,i-800):i+1500] if i>0 else 'no video tag')
+          print('---- script urls')
+          print(re.findall(r'https?://[^\s"\'<>]+',s)[:40])
+          PY
+      - name: Save
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hsex-detail
+          path: d1.html
+          retention-days: 2
