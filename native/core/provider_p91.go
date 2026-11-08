@@ -1099,7 +1099,7 @@ func (d *Downloader) p91MediaFor(address string, insecure bool, referer string) 
 	if strings.TrimSpace(referer) == "" {
 		referer = p91SiteURL + "/"
 	}
-	return providerMedia{
+	media := providerMedia{
 		URL:     address,
 		Referer: referer,
 		credentials: &providerMediaCredentials{
@@ -1113,6 +1113,57 @@ func (d *Downloader) p91MediaFor(address string, insecure bool, referer string) 
 			sendCookie: true,
 		},
 	}
+	// 直链带时间戳签名，播到一半过期就只能重新解析；续传连续失败时中转会调它。
+	if viewkey := p91ViewkeyOf(referer); viewkey != "" {
+		media.Reload = func(ctx context.Context) (string, error) {
+			return d.p91Reload(ctx, viewkey)
+		}
+	}
+	return media
+}
+
+// p91ViewkeyOf 从详情页地址里取出 viewkey，用来给续传兜底重新解析。
+func p91ViewkeyOf(pageURL string) string {
+	index := strings.Index(pageURL, "viewkey=")
+	if index < 0 {
+		return ""
+	}
+	value := pageURL[index+len("viewkey="):]
+	if cut := strings.IndexAny(value, "&#?"); cut >= 0 {
+		value = value[:cut]
+	}
+	return strings.TrimSpace(value)
+}
+
+// p91Reload 在播放中途直链失效时重新解析一条：换游客标记重新渲染详情页，
+// 再按可用性探测一遍。签名过期的老地址救不回来，只能靠这条新地址接着播。
+func (d *Downloader) p91Reload(ctx context.Context, viewkey string) (string, error) {
+	pageURL := p91SiteURL + "/view_video.php?viewkey=" + url.QueryEscape(viewkey)
+	pageText, err := d.p91Get(ctx, pageURL)
+	if err != nil {
+		return "", err
+	}
+	candidates, _ := p91MediaCandidates(pageText, pageURL)
+	for _, address := range candidates {
+		if _, err := d.p91Probe(ctx, address, pageURL); err == nil {
+			return address, nil
+		}
+	}
+	if len(candidates) > 0 {
+		// 探测都失败也可能只是探测被限流，给第一条让播放器自己试。
+		return candidates[0], nil
+	}
+	// 详情页这次没给出地址，换一套游客身份再要一次。
+	p91ResetGuest()
+	pageText, err = d.p91Get(ctx, pageURL)
+	if err != nil {
+		return "", err
+	}
+	candidates, _ = p91MediaCandidates(pageText, pageURL)
+	if len(candidates) == 0 {
+		return "", errors.New("91porn 重新解析未取到播放地址")
+	}
+	return candidates[0], nil
 }
 
 // p91Probe 确认直链真的能出流。

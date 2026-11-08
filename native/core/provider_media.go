@@ -23,6 +23,10 @@ type providerMedia struct {
 	NeedsParse  bool
 	Variants    []providerMedia
 	Hook        seku.StreamHook
+	// Reload 让站源在播放中途失效时重新解析一次播放地址。
+	// 91porn 的直链带时间戳签名（st 参数），播到一半签名过期就只能重新取；
+	// 只有实现了这个回调的站源会启用，其它源为 nil，传输路径完全不变。
+	Reload func(context.Context) (string, error)
 	// QualityOptions 是站源直接给出的可选清晰度档位（如 1080/720/540/480/360）。
 	// 番茄这类「按档位分别缓存」的源走这个字段，避免为了列档位而伪造多条线路。
 	QualityOptions []int

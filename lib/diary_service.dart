@@ -45,6 +45,10 @@ class DiaryService {
     for (var i = lines.length - 1; i >= start; i--) {
       final line = lines[i];
       if (!line.contains('[Stream]')) continue;
+      // 续传相关事件单独看：relay_resume 是「断了但接上了」的正常过程，
+      // 不能当失败原因；只有放弃和换线失败才是真原因。
+      if (line.contains('relay_give_up')) return '连续断流，续传未恢复';
+      if (line.contains('relay_resume_failed')) return '断流后无法续传';
       final error = RegExp(r'error=([a-z_]+)').firstMatch(line)?.group(1);
       if (error != null && error != 'none') return _streamIssueText(error);
       final status = RegExp(r'HTTP (\d{3})').firstMatch(line)?.group(1);

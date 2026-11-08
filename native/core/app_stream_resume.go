@@ -11,15 +11,33 @@ import (
 	"time"
 )
 
+// 一条播放连接最多续传几次、最多续多久。
+//
+// 站方 CDN 掐得很勤（有的十几秒一次），次数太少等于没做；但也不能无限续，
+// 否则一个已经死掉的地址会一直挂着，播放器看到的是永远转圈。
+const (
+	nativeRelayMaxResumes  = 64
+	nativeRelayMaxDuration = 10 * time.Minute
+	// 连续这么多次续不上就认为这条链废了，换备用线路 / 重新解析。
+	nativeRelayFailBeforeSwitch = 2
+	// 服务器不支持 Range 时只能从头丢字节，丢得太多还不如换线路。
+	nativeRelayMaxSkip = 8 << 20
+	// 一次播放最多重新解析几次地址：签名过期要重新取，但不能把详情页打爆。
+	nativeRelayMaxReloads = 3
+)
+
 // nativeRelayBody 把上游媒体流转发给播放器，并在上游掐断时从断点续拉。
 //
 // 91porn 这类站的 CDN 会在几秒到几十秒后主动断开长连接，播放器看到的就是
 // 「传输中断」。这里记录已经写出的字节数，断了就用 Range 从断点再拉一段接上，
 // 播放器全程只看到一条连续的流；只有真的续不上时才让连接结束。
 //
+// 续不上时依次尝试：同一地址重试 → 换备用直链（providerMedia.Variants）→
+// 让站源重新解析一条新地址（签名过期的情况只有这条能救）。
+//
 // 只对显式标记了 resilient 的媒体凭据启用（目前只有 91porn），
 // 其它站源的传输路径完全不变。
-func (stream *nativeStreamServer) nativeRelayBody(ctx context.Context, writer http.ResponseWriter, method string, upstream *http.Request, finalURL *url.URL, response *http.Response, reader *bufio.Reader, info nativeStreamDiagnostic) {
+func (stream *nativeStreamServer) nativeRelayBody(ctx context.Context, writer http.ResponseWriter, method string, upstream *http.Request, session *nativeStreamSession, assetKey, address string, response *http.Response, reader *bufio.Reader, info nativeStreamDiagnostic) {
 	start, total := int64(0), int64(-1)
 	if a, _, t, valid := nativeContentRange(response.Header.Get("Content-Range")); valid {
 		start, total = a, t
@@ -28,6 +46,9 @@ func (stream *nativeStreamServer) nativeRelayBody(ctx context.Context, writer ht
 	}
 	written := int64(0)
 	resumes := 0
+	failures := 0
+	deadline := time.Now().Add(nativeRelayMaxDuration)
+	current := address
 	// 上一次续传打开的连接，续传前先显式关掉：放在 defer 里会随循环累积，
 	// 反复断流时同时挂着好几条上游连接。
 	closeCurrent := func() {}
@@ -40,6 +61,7 @@ func (stream *nativeStreamServer) nativeRelayBody(ctx context.Context, writer ht
 				return
 			}
 			written += int64(n)
+			failures = 0
 			if flusher, ok := writer.(http.Flusher); ok {
 				flusher.Flush()
 			}
@@ -59,25 +81,37 @@ func (stream *nativeStreamServer) nativeRelayBody(ctx context.Context, writer ht
 			closeCurrent()
 			return
 		}
-		if resumes >= nativeRelayMaxResumes {
-			stream.nativeLogError(info, "relay_give_up", finalURL.String(), readErr, "")
+		if resumes >= nativeRelayMaxResumes || time.Now().After(deadline) {
+			stream.nativeLogError(info, "relay_give_up", current, readErr, "")
 			closeCurrent()
 			return
 		}
 		resumes++
-		stream.nativeLogError(info, "relay_resume", finalURL.String(), readErr, "")
-		// 断流多半是 CDN 主动掐，不是网络抖，等太久播放器缓冲就见底了。
-		// 前三次几乎立刻重连，后面再逐步退避。
-		delay := time.Duration(min(resumes, 3)) * 80 * time.Millisecond
+		failures++
+		stream.nativeLogError(info, "relay_resume", current, readErr, "")
 		select {
-		case <-time.After(delay):
+		case <-time.After(nativeRelayBackoff(resumes)):
 		case <-ctx.Done():
 			closeCurrent()
 			return
 		}
-		next, closer, err := stream.nativeResume(ctx, upstream, finalURL, start+written)
+		offset := start + written
+		// 连续几次都续不上，说明这条链多半已经废了（签名过期 / 节点拉黑）：
+		// 先换同片的备用直链，不行再让站源重新解析一条新地址。
+		if failures >= nativeRelayFailBeforeSwitch {
+			if switched, next, closer, err := stream.nativeRelaySwitch(ctx, upstream, session, assetKey, current, offset); err == nil {
+				stream.nativeLog(info, "relay_switch", next, "from="+nativeStreamHost(current), 0, "")
+				closeCurrent()
+				closeCurrent, reader = closer, switched
+				current = next
+				failures = 0
+				continue
+			}
+			failures = 0
+		}
+		next, closer, err := stream.nativeResumeFrom(ctx, upstream, current, offset)
 		if err != nil || next == nil {
-			stream.nativeLogError(info, "relay_resume_failed", finalURL.String(), err, "")
+			stream.nativeLogError(info, "relay_resume_failed", current, err, "")
 			closeCurrent()
 			return
 		}
@@ -86,22 +120,70 @@ func (stream *nativeStreamServer) nativeRelayBody(ctx context.Context, writer ht
 	}
 }
 
-// nativeRelayMaxResumes 是一条播放连接最多续传几次。站方 CDN 掐得很勤
-// （有的几十秒一次），次数太少等于没做，太多又会让已经死掉的地址拖住播放器。
-const nativeRelayMaxResumes = 16
+func nativeStreamHost(address string) string {
+	if parsed, err := url.Parse(address); err == nil && parsed.Host != "" {
+		return parsed.Host
+	}
+	return ""
+}
+
+// nativeRelayBackoff 是断流后的重连间隔。前几次几乎立刻重连（CDN 主动掐断，
+// 等久了播放器缓冲就见底），连续失败时逐步退避，避免把站方限流打得更死。
+func nativeRelayBackoff(resumes int) time.Duration {
+	delay := time.Duration(resumes) * 80 * time.Millisecond
+	if delay > 1200*time.Millisecond {
+		delay = 1200 * time.Millisecond
+	}
+	if delay < 80*time.Millisecond {
+		delay = 80 * time.Millisecond
+	}
+	return delay
+}
+
+// nativeRelaySwitch 找一条还能用的地址接管当前的断点：先备用直链，再重新解析。
+// 换成功会把新地址写回会话，后续的 Range 请求直接走新地址。
+func (stream *nativeStreamServer) nativeRelaySwitch(ctx context.Context, upstream *http.Request, session *nativeStreamSession, assetKey, current string, offset int64) (*bufio.Reader, string, func(), error) {
+	var lastErr error
+	for _, candidate := range session.relayCandidates(current) {
+		reader, closer, err := stream.nativeResumeFrom(ctx, upstream, candidate, offset)
+		if err == nil {
+			session.promoteAddress(assetKey, candidate)
+			return reader, candidate, closer, nil
+		}
+		lastErr = err
+	}
+	if reissued, err := session.reloadAddress(ctx); err == nil && reissued != "" && reissued != current {
+		if reader, closer, resumeErr := stream.nativeResumeFrom(ctx, upstream, reissued, offset); resumeErr == nil {
+			session.promoteAddress(assetKey, reissued)
+			return reader, reissued, closer, nil
+		} else {
+			lastErr = resumeErr
+		}
+	}
+	if lastErr == nil {
+		lastErr = errors.New("没有可用的备用线路")
+	}
+	return nil, "", nil, lastErr
+}
 
 // nativeResume 从 offset 处重新拉一段。返回的 reader 已经跳到 offset，
 // 调用方接着往下写即可，字节不会重复也不会缺失。
 func (stream *nativeStreamServer) nativeResume(ctx context.Context, upstream *http.Request, finalURL *url.URL, offset int64) (*bufio.Reader, func(), error) {
-	target := finalURL
-	if target == nil {
-		target = upstream.URL
+	if finalURL == nil {
+		return nil, nil, errors.New("缺少续传地址")
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, target.String(), nil)
+	return stream.nativeResumeFrom(ctx, upstream, finalURL.String(), offset)
+}
+
+// nativeResumeFrom 用指定地址从 offset 处续拉。
+func (stream *nativeStreamServer) nativeResumeFrom(ctx context.Context, upstream *http.Request, address string, offset int64) (*bufio.Reader, func(), error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, address, nil)
 	if err != nil {
 		return nil, nil, err
 	}
 	request.Header = upstream.Header.Clone()
+	// If-Range 会让 CDN 在 ETag 不匹配时退回 200 整片，续传就白做了。
+	request.Header.Del("If-Range")
 	request.Header.Set("Range", fmt.Sprintf("bytes=%d-", offset))
 	response, err := stream.nativeRequest(request)
 	if err != nil {
@@ -116,16 +198,20 @@ func (stream *nativeStreamServer) nativeResume(ctx context.Context, upstream *ht
 	if response.StatusCode == http.StatusPartialContent {
 		actual, _, _, valid := nativeContentRange(response.Header.Get("Content-Range"))
 		if !valid {
-			closer()
-			return nil, nil, errors.New("续传缺少 Content-Range")
-		}
-		// 服务器从更早的位置开始给：先把多出来的字节读掉；
-		// 从更晚的位置开始给说明中间有缺口，这段数据接不上，直接放弃。
-		if actual > offset {
+			// 不少 CDN 会回 206 却不带 Content-Range。直接判死等于把能续的连接扔掉，
+			// 这里按「从 offset 开始」乐观处理。
+			skip = 0
+		} else if actual > offset {
+			// 从更晚的位置开始给，说明中间有缺口，接不上；换线路去。
 			closer()
 			return nil, nil, fmt.Errorf("续传位置超前（%d > %d）", actual, offset)
+		} else {
+			skip = offset - actual
 		}
-		skip = offset - actual
+	} else if offset > nativeRelayMaxSkip {
+		// 服务器不支持 Range，只能从头丢字节。丢几兆还能接受，丢得多不如换线路。
+		closer()
+		return nil, nil, fmt.Errorf("续传不受支持（HTTP 200，需丢弃 %d 字节）", offset)
 	}
 	if skip > 0 {
 		if _, err := io.CopyN(io.Discard, response.Body, skip); err != nil {

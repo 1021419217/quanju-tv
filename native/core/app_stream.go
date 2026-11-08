@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -43,6 +44,64 @@ type nativeStreamSession struct {
 	diagnosticID string
 	adBlock      bool
 	hook         seku.StreamHook
+	// fallbacks 是同一部片的备用直链（来自 providerMedia.Variants）。
+	// 主链被 CDN 掐死后按序换，换成功就记住，后续请求都走这条。
+	fallbacks []string
+	// reload 让站源重新解析一次播放地址：91porn 的直链带时间戳签名，
+	// 播到一半签名过期时只能重新取一条，靠它接着播下去。
+	reload func(context.Context) (string, error)
+	// fallbackCursor 记录备用直链已经试到第几条，避免反复撞同一条死链。
+	fallbackCursor int
+	// reloads 是一次播放里已经重新解析过几次，防止详情页被反复打。
+	reloads int
+}
+
+// relayCandidates 取下一批可以接手的备用地址（每条只给一次）。
+func (session *nativeStreamSession) relayCandidates(current string) []string {
+	session.mu.Lock()
+	defer session.mu.Unlock()
+	if session.fallbackCursor >= len(session.fallbacks) {
+		return nil
+	}
+	candidates := make([]string, 0, len(session.fallbacks))
+	for session.fallbackCursor < len(session.fallbacks) {
+		address := session.fallbacks[session.fallbackCursor]
+		session.fallbackCursor++
+		if address != "" && address != current {
+			candidates = append(candidates, address)
+		}
+	}
+	return candidates
+}
+
+// promoteAddress 把换成功的新地址写回会话，后续 Range 请求直接走它。
+func (session *nativeStreamSession) promoteAddress(assetKey, address string) {
+	if assetKey == "" || address == "" {
+		return
+	}
+	session.mu.Lock()
+	defer session.mu.Unlock()
+	asset, found := session.assets[assetKey]
+	if !found {
+		return
+	}
+	asset.address = address
+	session.assets[assetKey] = asset
+}
+
+// reloadAddress 让站源重新解析一条播放地址；没实现 Reload 的源返回空。
+func (session *nativeStreamSession) reloadAddress(ctx context.Context) (string, error) {
+	session.mu.Lock()
+	reload := session.reload
+	if reload == nil || session.reloads >= nativeRelayMaxReloads {
+		session.mu.Unlock()
+		return "", nil
+	}
+	session.reloads++
+	session.mu.Unlock()
+	reloadCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	return reload(reloadCtx)
 }
 
 type nativeStreamServer struct {
@@ -81,6 +140,54 @@ func (stream *nativeStreamServer) nativeRequest(request *http.Request) (*http.Re
 
 var nativePlaylistURI = regexp.MustCompile(`URI="([^"]+)"`)
 
+// nativeFetchWithFallback 在主链连不上或被站方拒绝时依次试备用直链，
+// 再让站源重新解析一次（只有实现了 Reload 的源才有这一步）。
+// 只返回真正能用的那条；都不行时返回最后一次错误。
+func (stream *nativeStreamServer) nativeFetchWithFallback(ctx context.Context, request *http.Request, session *nativeStreamSession, address string) (*http.Response, *http.Request, string, error) {
+	attempt := func(target string) (*http.Response, *http.Request, error) {
+		upstream, err := http.NewRequestWithContext(ctx, request.Method, target, nil)
+		if err != nil {
+			return nil, nil, err
+		}
+		upstream.Header.Set("User-Agent", userAgent)
+		upstream.Header.Set("Referer", session.referer)
+		for _, name := range []string{"Range", "If-Range"} {
+			if value := request.Header.Get(name); value != "" {
+				upstream.Header.Set(name, value)
+			}
+		}
+		response, err := stream.nativeRequest(upstream)
+		if err != nil {
+			return nil, upstream, err
+		}
+		if response.StatusCode >= 400 {
+			_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 64<<10))
+			response.Body.Close()
+			return nil, upstream, fmt.Errorf("上游返回 HTTP %d", response.StatusCode)
+		}
+		return response, upstream, nil
+	}
+	var lastErr error
+	for _, candidate := range session.relayCandidates(address) {
+		response, upstream, err := attempt(candidate)
+		if err == nil {
+			return response, upstream, candidate, nil
+		}
+		lastErr = err
+	}
+	if reissued, err := session.reloadAddress(ctx); err == nil && reissued != "" && reissued != address {
+		response, upstream, retryErr := attempt(reissued)
+		if retryErr == nil {
+			return response, upstream, reissued, nil
+		}
+		lastErr = retryErr
+	}
+	if lastErr == nil {
+		lastErr = errors.New("没有可用的备用线路")
+	}
+	return nil, nil, "", lastErr
+}
+
 func newNativeStreamServer(d *Downloader) (*nativeStreamServer, error) {
 	listener, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {
@@ -100,7 +207,12 @@ func (stream *nativeStreamServer) nativeOpen(media providerMedia, adBlock bool) 
 	}
 	token := hex.EncodeToString(tokenBytes)
 	ctx, cancel := context.WithCancel(providerMediaContext(context.Background(), media.credentials))
-	session := &nativeStreamSession{assets: map[string]nativeStreamAsset{}, referer: media.Referer, key: media.HLSKey, ctx: ctx, cancel: cancel, lastUsed: time.Now(), credentials: media.credentials, diagnosticID: nativeStreamID(token), adBlock: adBlock, hook: media.Hook}
+	session := &nativeStreamSession{assets: map[string]nativeStreamAsset{}, referer: media.Referer, key: media.HLSKey, ctx: ctx, cancel: cancel, lastUsed: time.Now(), credentials: media.credentials, diagnosticID: nativeStreamID(token), adBlock: adBlock, hook: media.Hook, reload: media.Reload}
+	for _, variant := range media.Variants {
+		if address := strings.TrimSpace(variant.URL); address != "" && address != media.URL {
+			session.fallbacks = append(session.fallbacks, address)
+		}
+	}
 	stream.mu.Lock()
 	for id, old := range stream.sessions {
 		if time.Since(old.lastUsed) > 10*time.Minute {
@@ -357,6 +469,20 @@ func (stream *nativeStreamServer) nativeServe(writer http.ResponseWriter, reques
 		}
 	}
 	response, err := stream.nativeRequest(upstream)
+	// 主链连不上或是被站方明确拒（403 多半是签名过期），给可续传的源换一次地址：
+	// 备用直链 → 重新解析。其它站源不满足条件，行为与原来完全一致。
+	if (err != nil || response.StatusCode >= 400) && session.credentials != nil && session.credentials.resilient {
+		if retry, retryRequest, retryAddress, retryErr := stream.nativeFetchWithFallback(ctx, request, session, fetchAddress); retryErr == nil {
+			if err != nil {
+				err = nil
+			} else {
+				_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 64<<10))
+				response.Body.Close()
+			}
+			response, upstream, fetchAddress = retry, retryRequest, retryAddress
+			session.promoteAddress(parts[1], retryAddress)
+		}
+	}
 	if err != nil {
 		http.Error(writer, "读取媒体失败，请重试", http.StatusBadGateway)
 		return
@@ -424,7 +550,7 @@ func (stream *nativeStreamServer) nativeServe(writer http.ResponseWriter, reques
 		// 标记了 resilient 的源（站方 CDN 会掐长连接）走断点续传中转：
 		// 上游断开时从断点再拉一段，播放器不会看到「传输中断」。
 		if session.credentials != nil && session.credentials.resilient {
-			stream.nativeRelayBody(ctx, writer, request.Method, upstream, finalURL, response, reader, info)
+			stream.nativeRelayBody(ctx, writer, request.Method, upstream, session, parts[1], finalURL.String(), response, reader, info)
 			return
 		}
 		_, _ = io.Copy(writer, reader)
