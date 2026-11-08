@@ -91,6 +91,12 @@ func (credentials *providerMediaCredentials) client(client *http.Client) *http.C
 // insecureMediaTransport 复制一份跳过证书校验的传输层。
 // 只有站源明确标记了 insecureTLS（缺中间证书的 CDN）才会走到这里。
 func insecureMediaTransport(base http.RoundTripper) http.RoundTripper {
+	// 指纹传输不能在这里被换成普通 Transport：91/theporny 这类 CDN 正是按
+	// TLS 指纹放行的，丢掉指纹等于白试。改成在指纹客户端内部跳过证书校验。
+	if browser, ok := base.(*huangguoBrowserTransport); ok && browser != nil {
+		browser.forceInsecure()
+		return browser
+	}
 	transport, ok := base.(*http.Transport)
 	if !ok || transport == nil {
 		return base

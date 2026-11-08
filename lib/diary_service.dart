@@ -49,10 +49,15 @@ class DiaryService {
       // 不能当失败原因；只有放弃和换线失败才是真原因。
       if (line.contains('relay_give_up')) return '连续断流，续传未恢复';
       if (line.contains('relay_resume_failed')) return '断流后无法续传';
+      // 同一句「传输中断」可能来自主站、CDN 或分片，带上域名才能定位是谁在断。
+      final target = RegExp(r'path=([^\s/]+)').firstMatch(line)?.group(1);
+      final where = (target == null || target.isEmpty) ? '' : '（$target）';
       final error = RegExp(r'error=([a-z_]+)').firstMatch(line)?.group(1);
-      if (error != null && error != 'none') return _streamIssueText(error);
+      if (error != null && error != 'none') {
+        return '${_streamIssueText(error)}$where';
+      }
       final status = RegExp(r'HTTP (\d{3})').firstMatch(line)?.group(1);
-      if (status != null) return '站方 CDN 返回 HTTP $status';
+      if (status != null) return '站方 CDN 返回 HTTP $status$where';
       if (line.contains('asset_missing')) return '播放会话已过期';
     }
     return null;

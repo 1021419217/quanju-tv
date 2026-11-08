@@ -544,7 +544,11 @@ func (stream *nativeStreamServer) nativeServe(writer http.ResponseWriter, reques
 	}
 	// 主链连不上或是被站方明确拒（403 多半是签名过期），给可续传的源换一次地址：
 	// 备用直链 → 重新解析。其它站源不满足条件，行为与原来完全一致。
-	if (err != nil || response.StatusCode >= 400) && session.resilient {
+	// 换线（备用直链 → 重新解析）与「续传」是两件事：
+	// 续传只对会掐长连接的源有意义，而换线对所有源都必要——详情页给出的
+	// 第一条地址经常是死节点，不换就只能一直对着它重试。3.22 把两者绑在
+	// resilient 上，关掉续传时把换线也一起关了，直接导致「10 个 9 个播不出」。
+	if err != nil || (response != nil && response.StatusCode >= 400) {
 		if retry, retryRequest, retryAddress, retryErr := stream.nativeFetchWithFallback(ctx, request, session, fetchAddress); retryErr == nil {
 			if err != nil {
 				err = nil

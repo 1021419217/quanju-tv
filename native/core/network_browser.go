@@ -78,7 +78,27 @@ func (transport *huangguoBrowserTransport) matches(request *http.Request) bool {
 		after = transport.upgraded[host]
 	}
 	transport.mu.Unlock()
-	return after
+	if after {
+		return true
+	}
+	return browserSuffixHost(host)
+}
+
+// browserFingerprintSuffixes 是「媒体 CDN 按 TLS 指纹拦截」的域名后缀。
+//
+// 91porn 的片源不在主站，而在 91p52.com 的一批随机子域（v9./ccm./…）上。
+// 站方对普通 Go/curl 的 ClientHello 直接 RST，浏览器却能秒开——和 theporny
+// 是同一类反爬（按 JA3/JA4 拒绝），所以这里也交给 Chrome 150 指纹客户端。
+// 主站 91porn.com 不在列表里：它现在能出列表，换指纹反而可能触发验证页。
+var browserFingerprintSuffixes = []string{"91p52.com"}
+
+func browserSuffixHost(host string) bool {
+	for _, suffix := range browserFingerprintSuffixes {
+		if host == suffix || strings.HasSuffix(host, "."+suffix) {
+			return true
+		}
+	}
+	return false
 }
 
 // browserEligibleRequest 只有 GET/HEAD 的 http(s) 请求才适合改换指纹传输。
@@ -138,6 +158,24 @@ func (transport *huangguoBrowserTransport) registerHost(host string) {
 		transport.custom[host] = true
 	}
 	transport.mu.Unlock()
+}
+
+// forceInsecure 让指纹客户端跳过证书校验，同时保留 Chrome 指纹。
+//
+// 站方 CDN 证书链不完整时，标准传输会先报错、再被上层切成「宽松传输」。
+// 如果那一步直接把指纹传输换成普通 Go Transport，指纹就丢了——对这个靠
+// 指纹放行的 CDN 等于二次失败。所以宽松模式也要在指纹客户端内部打开。
+func (transport *huangguoBrowserTransport) forceInsecure() {
+	transport.mu.Lock()
+	defer transport.mu.Unlock()
+	if transport.insecure {
+		return
+	}
+	transport.insecure = true
+	for key, client := range transport.clients {
+		client.CloseIdleConnections()
+		delete(transport.clients, key)
+	}
 }
 
 func (transport *huangguoBrowserTransport) createClient(proxy string) (browserHTTPClient, error) {
@@ -230,7 +268,30 @@ func huangguoBrowserHeaders(request *http.Request) fhttp.Header {
 	} else if parsed, err := url.Parse(referer); err == nil && !strings.EqualFold(parsed.Host, request.URL.Host) {
 		headers["sec-fetch-site"] = []string{"cross-site"}
 	}
+	// 媒体请求要装成「video 元素在拉流」，不能沿用「导航到网页」那套头：
+	// accept=text/html + sec-fetch-dest=document 对 CDN 来说是明显异常，
+	// 有的节点据此直接断流。只有真带了 Range 或声明 video 的才算媒体请求。
+	if isMediaFingerprintRequest(request) {
+		headers["accept"] = []string{"*/*"}
+		headers["sec-fetch-dest"] = []string{"video"}
+		headers["sec-fetch-mode"] = []string{"no-cors"}
+		headers["sec-fetch-site"] = []string{"cross-site"}
+		delete(headers, "upgrade-insecure-requests")
+		delete(headers, "sec-fetch-user")
+	}
 	return headers
+}
+
+// isMediaFingerprintRequest 判断这次请求是不是播放器在拉媒体流。
+func isMediaFingerprintRequest(request *http.Request) bool {
+	if request.Header.Get("Range") != "" {
+		return true
+	}
+	if strings.EqualFold(request.Header.Get("Sec-Fetch-Dest"), "video") {
+		return true
+	}
+	accept := strings.ToLower(request.Header.Get("Accept"))
+	return strings.Contains(accept, "video/") || strings.Contains(accept, "audio/")
 }
 
 func standardBrowserHeaders(headers fhttp.Header) http.Header {
