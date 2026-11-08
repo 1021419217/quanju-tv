@@ -243,3 +243,115 @@ func TestP91ProbeReason(t *testing.T) {
 		t.Fatalf("DNS 说明错误: %s", got)
 	}
 }
+
+// 列表里混着站方插的混淆卡片（外层 col-lg-8）：它显示的是别片的图/标题，
+// 链接却指向另一部片，点进去就「看到 A、播的是 B」。必须整块跳过。
+func TestP91SkipDecoyCards(t *testing.T) {
+	page := `<html><body>
+<div class="col-xs-12 col-lg-3">
+  <div class="well well-sm videos-text-align">
+    <div class="video-img-box"><a href="/view_video.php?viewkey=aaa111"><img src="https://img/a.jpg"></a></div>
+    <div class="video-info">
+      <a class="video-title" href="/view_video.php?viewkey=aaa111" title="真标题 A">真标题 A</a>
+      <span class="info">From:</span> 作者甲
+    </div>
+  </div>
+</div>
+<div class="col-xs-12 col-lg-8 ad-slot">
+  <div class="well well-sm videos-text-align">
+    <div class="video-img-box"><a href="/view_video.php?viewkey=bbb222"><img src="https://img/b.jpg"></a></div>
+    <div class="video-info"><span class="video-title">混淆标题 B</span></div>
+  </div>
+</div>
+<div class="col-xs-12 col-lg-3">
+  <div class="well well-sm videos-text-align">
+    <div class="video-img-box"><a href="/view_video.php?viewkey=ccc333"><img data-src="https://img/c.jpg"></a></div>
+    <div class="video-info"><span class="video-title">标题 C</span></div>
+  </div>
+</div>
+</body></html>`
+	items := parseP91Cards(page, "rf")
+	if len(items) != 2 {
+		t.Fatalf("混淆卡片没被跳过: %+v", items)
+	}
+	if items[0].SourceID != "aaa111" || items[0].Title != "真标题 A" {
+		t.Fatalf("第一张卡片错误: %s %q", items[0].SourceID, items[0].Title)
+	}
+	if items[1].SourceID != "ccc333" || items[1].Cover != "https://img/c.jpg" {
+		t.Fatalf("第二张卡片错误: %s %q", items[1].SourceID, items[1].Cover)
+	}
+	for _, item := range items {
+		if item.SourceID == "bbb222" {
+			t.Fatalf("混淆卡片混进来了")
+		}
+	}
+}
+
+// 一张卡片里出现两个 viewkey 时，以标题链接为准（封面链接可能被换成别的片）。
+func TestP91CardViewkeyPrefersTitleLink(t *testing.T) {
+	card := `<div class="well well-sm videos-text-align">
+  <div><a href="/view_video.php?viewkey=cover01"><img src="https://img/x.jpg"></a></div>
+  <div><a class="video-title" href="/view_video.php?viewkey=title02">标题</a></div>
+</div>`
+	if got := p91CardViewkey(card); got != "title02" {
+		t.Fatalf("应取标题链接: %s", got)
+	}
+	if got := p91CardTitle(card); got != "标题" {
+		t.Fatalf("标题错误: %q", got)
+	}
+}
+
+func TestP91PageMatchesViewkey(t *testing.T) {
+	if !p91PageMatchesViewkey(`<a href="/view_video.php?viewkey=abc123">x</a>`, "abc123") {
+		t.Fatalf("同片页面应判为匹配")
+	}
+	if p91PageMatchesViewkey(`<a href="/view_video.php?viewkey=zzz999">x</a>`, "abc123") {
+		t.Fatalf("渲染成别的片应判为不匹配")
+	}
+	if !p91PageMatchesViewkey(`<html>没有 viewkey 的模板</html>`, "abc123") {
+		t.Fatalf("页面无 viewkey 时不应误杀")
+	}
+}
+
+// 详情页的「相关推荐」会带一堆别的 viewkey。页面其实是 B、推荐位里恰好有 A 时，
+// 不能因为整页 contains 就把 B 当成 A —— 优先认 canonical / og:url 的自我标识。
+func TestP91PageMatchesViewkeyPrefersCanonical(t *testing.T) {
+	page := `<html><head>
+<link rel="canonical" href="https://91porn.com/view_video.php?viewkey=bbb222">
+<meta property="og:url" content="https://91porn.com/view_video.php?viewkey=bbb222">
+</head><body>
+<a href="/view_video.php?viewkey=aaa111">相关推荐 A</a>
+</body></html>`
+	if p91PageMatchesViewkey(page, "aaa111") {
+		t.Fatalf("canonical 指向 B 时不应认成 A")
+	}
+	if !p91PageMatchesViewkey(page, "bbb222") {
+		t.Fatalf("canonical 指向 B 时应认成 B")
+	}
+	if got := p91CanonicalViewkey(page); got != "bbb222" {
+		t.Fatalf("canonical 提取错误: %s", got)
+	}
+}
+
+// 详情页把标题/封面补进列表条目时，列表的标题与封面不能被改掉：
+// 站方随机渲染偶尔给出另一部片的标题，覆盖就会出现「点 A 变 B」。
+func TestMergeP91DetailKeepsListedTitle(t *testing.T) {
+	listed := nativeDrama{ID: "p91:aaa", Source: sourceP91, Title: "宠粉日", Cover: "https://img/a.jpg"}
+	fresh := nativeDrama{ID: "p91:aaa", Source: sourceP91, Title: "另一部片", Cover: "https://img/b.jpg", OnlineDate: "2026-11-01"}
+	merged := mergeP91Detail(listed, fresh)
+	if merged.Title != "宠粉日" {
+		t.Fatalf("标题被覆盖: %s", merged.Title)
+	}
+	if merged.Cover != "https://img/a.jpg" {
+		t.Fatalf("封面被覆盖: %s", merged.Cover)
+	}
+	if merged.OnlineDate != "2026-11-01" {
+		t.Fatalf("空字段没补上: %s", merged.OnlineDate)
+	}
+
+	// 列表只有占位标题时，应该采用详情页的真实标题。
+	placeholder := nativeDrama{ID: "p91:bbb", Source: sourceP91, Title: "91porn bbb222"}
+	if got := mergeP91Detail(placeholder, fresh).Title; got != "另一部片" {
+		t.Fatalf("占位标题应被替换: %s", got)
+	}
+}

@@ -2,7 +2,9 @@ package core
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/tls"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"html"
@@ -10,8 +12,10 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/text/encoding/simplifiedchinese"
@@ -38,7 +42,6 @@ import (
 const (
 	p91SiteURL   = "https://91porn.com"
 	p91UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-	p91Cookie    = "language=cn_CN; ga=1"
 )
 
 // p91CategoryEntries 是站方导航里的分类，原样保留。
@@ -81,13 +84,24 @@ func p91CategoryName(category string) string {
 }
 
 var (
-	p91CardRE     = regexp.MustCompile(`(?s)<div class="well well-sm videos-text-align">(.*?)</div>\s*</div>`)
-	p91ViewkeyRE  = regexp.MustCompile(`view_video(?:_hd)?\.php\?viewkey=([0-9a-zA-Z]+)`)
-	p91TitleRE    = regexp.MustCompile(`(?s)<span class="video-title[^"]*">(.*?)</span>`)
-	p91ThumbRE    = regexp.MustCompile(`<img[^>]+src="([^"]+)"`)
-	p91DurationRE = regexp.MustCompile(`<span class="duration">\s*([0-9:]+)\s*</span>`)
-	p91FromRE     = regexp.MustCompile(`<span class="info">From:</span>\s*([^<]*)`)
-	p91TagRE      = regexp.MustCompile(`<[^>]*>`)
+	p91ViewkeyRE    = regexp.MustCompile(`view_video(?:_hd)?\.php\?viewkey=([0-9a-zA-Z]+)`)
+	p91TitleRE      = regexp.MustCompile(`(?s)<span[^>]*class="[^"]*video-title[^"]*"[^>]*>(.*?)</span>`)
+	p91TitleLinkRE  = regexp.MustCompile(`(?is)<a\b[^>]*class\s*=\s*"[^"]*video-title[^"]*"[^>]*>(.*?)</a>`)
+	p91AnchorOpenRE = regexp.MustCompile(`(?is)<a\b[^>]*class\s*=\s*"[^"]*video-title[^"]*"[^>]*>`)
+	p91HrefRE       = regexp.MustCompile(`(?is)\bhref\s*=\s*["']([^"']*)["']`)
+	p91TitleAttrRE  = regexp.MustCompile(`(?is)\btitle\s*=\s*["']([^"']*)["']`)
+	p91ThumbRE      = regexp.MustCompile(`<img[^>]+src="([^"]+)"`)
+	p91DurationRE   = regexp.MustCompile(`<span class="duration">\s*([0-9:]+)\s*</span>`)
+	p91FromRE       = regexp.MustCompile(`<span class="info">From:</span>\s*([^<]*)`)
+	p91TagRE        = regexp.MustCompile(`<[^>]*>`)
+
+	// 用 div 配对切卡片：站方会在列表里插「混淆卡片」（外层容器带 col-lg-8，
+	// 显示的是 A 的图和标题、链接却指向 B），只靠正则跨卡片配对就会
+	// 「看见 A、点进去变 B」。这里按真实嵌套边界切块并跳过这些容器。
+	p91DivTokenRE  = regexp.MustCompile(`(?is)<div\b[^>]*>|</div>`)
+	p91ClassAttrRE = regexp.MustCompile(`(?is)\bclass\s*=\s*["']([^"']*)["']`)
+	p91ImgTagRE    = regexp.MustCompile(`(?is)<img\b[^>]*>`)
+	p91ImgAttrRE   = regexp.MustCompile(`(?is)\b(data-src|data-original|src)\s*=\s*["']([^"']+)["']`)
 
 	p91SourceTagRE = regexp.MustCompile(`(?i)<source[^>]+src\s*=\s*["']?([^"'\s>]+)`)
 	p91VideoTagRE  = regexp.MustCompile(`(?i)<video[^>]+src\s*=\s*["']?([^"'\s>]+)`)
@@ -107,19 +121,161 @@ var p91AdMediaHosts = []string{"kwai.net", "xhlive.net", "9splt.com", "jads.co",
 
 // ---- 请求 ----
 
-func (d *Downloader) p91Get(ctx context.Context, rawURL string) (string, error) {
-	return d.p91GetWith(ctx, rawURL, p91Cookie)
+// p91SessionState 保存本次运行期内的游客身份。
+//
+// 站方按 Cookie 认游客：每次请求都换一组身份，站点会当成新游客重新渲染，
+// 表现为「列表顺序跳、点进去变另一部片」。这里固定一个 ga（首次生成的随机
+// 数字），并把站方下发的 PHPSESSID 等会话 Cookie 记住，后续所有请求
+// （包括媒体请求）都带同一套，页面与播放地址就会稳定对应同一部片。
+var p91SessionState struct {
+	mu      sync.Mutex
+	guest   string
+	cookies map[string]string
 }
 
-// p91GetWith 允许换一份 Cookie 再取一次：站方偶尔给出「有标题没有播放源」的渲染，
-// 换游客标记重新渲染往往就带 source 了。
-func (d *Downloader) p91GetWith(ctx context.Context, rawURL, cookie string) (string, error) {
+func p91NewGuestMark() string {
+	var buffer [4]byte
+	if _, err := rand.Read(buffer[:]); err != nil {
+		return strconv.FormatInt(time.Now().UnixNano()%100_000_000, 10)
+	}
+	return strconv.FormatUint(uint64(binary.BigEndian.Uint32(buffer[:]))%100_000_000, 10)
+}
+
+func p91CookieHeader() string {
+	p91SessionState.mu.Lock()
+	defer p91SessionState.mu.Unlock()
+	if p91SessionState.cookies == nil {
+		p91SessionState.cookies = map[string]string{}
+	}
+	if p91SessionState.guest == "" {
+		p91SessionState.guest = p91NewGuestMark()
+	}
+	values := map[string]string{
+		"language":  "cn_CN",
+		"over18":    "1",
+		"CLIPSHARE": "1",
+		"ga":        p91SessionState.guest,
+	}
+	for name, value := range p91SessionState.cookies {
+		if name == "" || value == "" {
+			continue
+		}
+		values[name] = value
+	}
+	order := []string{"language", "over18", "CLIPSHARE", "ga"}
+	parts := make([]string, 0, len(values))
+	added := make(map[string]bool, len(values))
+	for _, name := range order {
+		if value, found := values[name]; found {
+			parts = append(parts, name+"="+value)
+			added[name] = true
+		}
+	}
+	for name, value := range values {
+		if added[name] {
+			continue
+		}
+		parts = append(parts, name+"="+value)
+	}
+	sort.Strings(parts[len(order):])
+	return strings.Join(parts, "; ")
+}
+
+// p91RememberCookies 把站方下发的会话 Cookie 记下来，下一次请求继续带。
+func p91RememberCookies(response *http.Response) {
+	if response == nil {
+		return
+	}
+	cookies := response.Cookies()
+	if len(cookies) == 0 {
+		return
+	}
+	p91SessionState.mu.Lock()
+	defer p91SessionState.mu.Unlock()
+	if p91SessionState.cookies == nil {
+		p91SessionState.cookies = map[string]string{}
+	}
+	for _, cookie := range cookies {
+		if cookie == nil || cookie.Name == "" {
+			continue
+		}
+		if cookie.MaxAge < 0 || (!cookie.Expires.IsZero() && cookie.Expires.Before(time.Now())) {
+			delete(p91SessionState.cookies, cookie.Name)
+			continue
+		}
+		p91SessionState.cookies[cookie.Name] = cookie.Value
+	}
+}
+
+// p91ResetGuest 丢弃当前游客身份，下一次请求会拿到一套全新的会话。
+func p91ResetGuest() {
+	p91SessionState.mu.Lock()
+	p91SessionState.guest = ""
+	p91SessionState.cookies = map[string]string{}
+	p91SessionState.mu.Unlock()
+}
+
+var (
+	p91CanonicalRE = regexp.MustCompile(`(?is)<link[^>]+rel=["']canonical["'][^>]*>`)
+	p91OGURLRE     = regexp.MustCompile(`(?is)<meta[^>]+property=["']og:url["'][^>]*>`)
+	p91ContentRE   = regexp.MustCompile(`(?is)content=["']([^"']+)["']`)
+)
+
+// p91PageMatchesViewkey 判断页面是不是讲的这部片。
+//
+// 详情页里「相关推荐 / 热门」会带上一堆别的 viewkey，用整页 contains 判断
+// 太容易把「页面其实是 B、推荐位里恰好有 A」误判成 A。优先看 canonical /
+// og:url —— 这两个只会写当前页自己的地址，是页面的唯一身份。
+func p91PageMatchesViewkey(pageText string, viewkey string) bool {
+	viewkey = strings.TrimSpace(viewkey)
+	if viewkey == "" {
+		return true
+	}
+	if own := p91CanonicalViewkey(pageText); own != "" {
+		return strings.EqualFold(own, viewkey)
+	}
+	if strings.Contains(pageText, "viewkey="+viewkey) {
+		return true
+	}
+	if strings.Contains(strings.ToLower(pageText), "viewkey%3d"+strings.ToLower(viewkey)) {
+		return true
+	}
+	return !strings.Contains(pageText, "viewkey=")
+}
+
+// p91CanonicalViewkey 从 canonical / og:url 里取当前页自己的 viewkey。
+func p91CanonicalViewkey(pageText string) string {
+	for _, pattern := range []struct {
+		tag  *regexp.Regexp
+		attr *regexp.Regexp
+	}{
+		{p91CanonicalRE, p91HrefRE},
+		{p91OGURLRE, p91ContentRE},
+	} {
+		tag := pattern.tag.FindString(pageText)
+		if tag == "" {
+			continue
+		}
+		match := pattern.attr.FindStringSubmatch(tag)
+		if match == nil {
+			continue
+		}
+		if id := p91ViewkeyFromHref(html.UnescapeString(match[1])); id != "" {
+			return id
+		}
+	}
+	return ""
+}
+
+func (d *Downloader) p91Get(ctx context.Context, rawURL string) (string, error) {
+	return d.p91GetWith(ctx, rawURL, "")
+}
+
+// p91GetWith 允许带一份额外 Cookie（用于换游客标记重新渲染，正常情况下传空）。
+func (d *Downloader) p91GetWith(ctx context.Context, rawURL, extraCookie string) (string, error) {
 	retries := d.cfg.Retries
 	if retries <= 0 {
 		retries = 3
-	}
-	if strings.TrimSpace(cookie) == "" {
-		cookie = p91Cookie
 	}
 	var lastErr error
 	for attempt := 1; attempt <= retries; attempt++ {
@@ -137,6 +293,10 @@ func (d *Downloader) p91GetWith(ctx context.Context, rawURL, cookie string) (str
 		if err != nil {
 			return "", err
 		}
+		cookie := p91CookieHeader()
+		if extra := strings.TrimSpace(extraCookie); extra != "" {
+			cookie += "; " + extra
+		}
 		request.Header.Set("User-Agent", p91UserAgent)
 		request.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
 		request.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
@@ -147,6 +307,7 @@ func (d *Downloader) p91GetWith(ctx context.Context, rawURL, cookie string) (str
 			lastErr = err
 			continue
 		}
+		p91RememberCookies(response)
 		body, readErr := io.ReadAll(io.LimitReader(response.Body, providerMaxBodyBytes+1))
 		response.Body.Close()
 		if readErr != nil {
@@ -243,43 +404,39 @@ func (d *Downloader) searchP91(ctx context.Context, query string, page int) ([]D
 
 func parseP91Cards(pageText, category string) []Drama {
 	cards := make([]string, 0, 24)
-	for _, block := range p91CardRE.FindAllStringSubmatch(pageText, -1) {
-		if len(block) > 1 {
-			cards = append(cards, block[1])
+	blocks := p91CardBlocks(pageText)
+	for _, block := range blocks {
+		if p91DecoyCard(block.ancestor) {
+			continue
 		}
+		cards = append(cards, block.html)
 	}
-	if len(cards) == 0 {
-		// 兜底：站方偶尔调 class，主正则整页不命中时按 viewkey 位置开窗，
-		// 保证列表不会直接空白。只在主路径失败时启用，不干扰正常解析。
+	if len(cards) == 0 && len(blocks) == 0 {
+		// 兜底：站方偶尔调 class，主路径整页不命中时按 viewkey 位置开窗，
+		// 保证列表不会直接空白。只在主路径完全没切出卡片时启用，
+		// 避免把刚刚过滤掉的混淆卡片又捡回来。
 		cards = p91FallbackWindows(pageText)
 	}
 	items := make([]Drama, 0, len(cards))
 	seen := make(map[string]bool, len(cards))
 	categoryName := p91CategoryName(category)
 	for _, card := range cards {
-		match := p91ViewkeyRE.FindStringSubmatch(card)
-		if match == nil {
-			continue
-		}
-		viewkey := strings.TrimSpace(match[1])
+		viewkey := p91CardViewkey(card)
 		if viewkey == "" || seen[viewkey] {
 			continue
 		}
 		seen[viewkey] = true
 
-		title := ""
-		if m := p91TitleRE.FindStringSubmatch(card); m != nil {
-			title = p91CleanText(m[1])
-		}
+		title := p91CardTitle(card)
 		if title == "" {
 			title = "91porn " + viewkey
 		}
 		thumb := ""
-		if m := p91ThumbRE.FindStringSubmatch(card); m != nil {
-			thumb = strings.TrimSpace(html.UnescapeString(m[1]))
-			if strings.HasPrefix(thumb, "//") {
-				thumb = "https:" + thumb
-			}
+		if tag := p91ImgTagRE.FindString(card); tag != "" {
+			thumb = p91ImgSource(tag)
+		}
+		if strings.HasPrefix(thumb, "//") {
+			thumb = "https:" + thumb
 		}
 		duration := ""
 		if m := p91DurationRE.FindStringSubmatch(card); m != nil {
@@ -305,6 +462,141 @@ func parseP91Cards(pageText, category string) []Drama {
 		items = append(items, item)
 	}
 	return items
+}
+
+// p91CardBlock 是一张列表卡片的 HTML 片段和它所有祖先的 class。
+type p91CardBlock struct {
+	html     string
+	ancestor string
+}
+
+type p91DivFrame struct {
+	card    bool
+	classes string
+	start   int
+}
+
+// p91CardBlocks 用 div 配对把页面切成一张张真实卡片。
+// 正则跨卡片配对会把「A 的标题」配到「B 的链接」上，是按图点开却播放别的内容的根因之一。
+func p91CardBlocks(pageText string) []p91CardBlock {
+	blocks := make([]p91CardBlock, 0, 24)
+	stack := make([]p91DivFrame, 0, 32)
+	for _, loc := range p91DivTokenRE.FindAllStringIndex(pageText, -1) {
+		token := pageText[loc[0]:loc[1]]
+		if strings.HasPrefix(token, "</") {
+			if len(stack) == 0 {
+				continue
+			}
+			frame := stack[len(stack)-1]
+			stack = stack[:len(stack)-1]
+			if !frame.card {
+				continue
+			}
+			ancestor := make([]string, 0, len(stack))
+			for _, parent := range stack {
+				ancestor = append(ancestor, parent.classes)
+			}
+			blocks = append(blocks, p91CardBlock{html: pageText[frame.start:loc[1]], ancestor: strings.Join(ancestor, " ")})
+			continue
+		}
+		classes := ""
+		if m := p91ClassAttrRE.FindStringSubmatch(token); m != nil {
+			classes = strings.ToLower(strings.TrimSpace(m[1]))
+		}
+		stack = append(stack, p91DivFrame{
+			card:    strings.Contains(classes, "videos-text-align"),
+			classes: classes,
+			start:   loc[0],
+		})
+	}
+	return blocks
+}
+
+// p91DecoyCard 判断卡片是否属于站方插入的混淆/广告容器。
+// 正常卡片外层是 col-lg-3，混淆卡片是 col-lg-8（标题图片抄隔壁，链接指向别的片子）。
+func p91DecoyCard(ancestor string) bool {
+	ancestor = strings.ToLower(ancestor)
+	if strings.Contains(ancestor, "col-lg-8") || strings.Contains(ancestor, "sponsor") {
+		return true
+	}
+	for _, name := range strings.Fields(ancestor) {
+		if name == "ad" || strings.HasPrefix(name, "ad-") || strings.HasPrefix(name, "ads-") {
+			return true
+		}
+	}
+	return false
+}
+
+// p91CardViewkey 取卡片里的视频 ID：优先标题链接，其次整卡第一个 viewkey。
+// 标题链接和封面链接正常情况指向同一部片；混淆卡片会把其中一个指到别处。
+func p91CardViewkey(card string) string {
+	if anchor := p91AnchorOpenRE.FindString(card); anchor != "" {
+		if m := p91HrefRE.FindStringSubmatch(anchor); m != nil {
+			if viewkey := p91ViewkeyFromHref(m[1]); viewkey != "" {
+				return viewkey
+			}
+		}
+	}
+	if m := p91ViewkeyRE.FindStringSubmatch(card); m != nil {
+		return m[1]
+	}
+	return ""
+}
+
+func p91ViewkeyFromHref(href string) string {
+	if m := p91ViewkeyRE.FindStringSubmatch(href); m != nil {
+		return m[1]
+	}
+	return ""
+}
+
+// p91CardTitle 取卡片标题：优先 <a class="video-title" title="..."> 的属性，
+// 再取标签内文本，最后退回 <span class="video-title">。
+func p91CardTitle(card string) string {
+	if m := p91TitleLinkRE.FindStringSubmatch(card); m != nil {
+		title := p91CleanText(m[1])
+		if title == "" {
+			if anchor := p91AnchorOpenRE.FindString(card); anchor != "" {
+				if attr := p91TitleAttrRE.FindStringSubmatch(anchor); attr != nil {
+					title = p91CleanText(attr[1])
+				}
+			}
+		}
+		if title != "" {
+			return title
+		}
+	}
+	if m := p91TitleRE.FindStringSubmatch(card); m != nil {
+		return p91CleanText(m[1])
+	}
+	if anchor := p91AnchorOpenRE.FindString(card); anchor != "" {
+		if attr := p91TitleAttrRE.FindStringSubmatch(anchor); attr != nil {
+			return p91CleanText(attr[1])
+		}
+	}
+	return ""
+}
+
+func p91ImgSource(tag string) string {
+	values := make(map[string]string, 3)
+	for _, m := range p91ImgAttrRE.FindAllStringSubmatch(tag, -1) {
+		name := strings.ToLower(m[1])
+		if _, found := values[name]; !found {
+			values[name] = strings.TrimSpace(m[2])
+		}
+	}
+	for _, name := range []string{"data-src", "data-original", "src"} {
+		value := values[name]
+		if value == "" {
+			continue
+		}
+		lower := strings.ToLower(value)
+		if strings.Contains(lower, "loading") || strings.Contains(lower, "blank") || strings.Contains(lower, "default") {
+			continue
+		}
+		return html.UnescapeString(value)
+	}
+	return ""
 }
 
 func descriptionOr(uploader string) string {
@@ -333,6 +625,36 @@ func p91FallbackWindows(pageText string) []string {
 	return windows
 }
 
+// mergeP91Detail 把详情页补到的字段并进列表里已有的条目。
+//
+// 列表卡片是用户实际点的那一条，标题和封面必须保持不动：站方详情页按游客身份
+// 渲染，偶尔会给出另一部片的标题/封面。如果直接用 mergeNativeDrama 覆盖，
+// 就会出现「点 A 进去看到 B、返回列表这一格也变成 B」。
+func mergeP91Detail(listed, fresh nativeDrama) nativeDrama {
+	if listed.ID != fresh.ID {
+		return mergeNativeDrama(listed, fresh)
+	}
+	merged := mergeNativeDrama(listed, fresh)
+	if title := strings.TrimSpace(listed.Title); !p91PlaceholderTitle(title) {
+		merged.Title = listed.Title
+	}
+	if strings.TrimSpace(listed.Cover) != "" {
+		merged.Cover = listed.Cover
+	}
+	return merged
+}
+
+// p91PlaceholderTitle 判断列表标题是不是「没解析出标题」时的占位
+// （`91porn <viewkey>`）。这种时候应该采用详情页给的标题。
+func p91PlaceholderTitle(title string) bool {
+	title = strings.TrimSpace(title)
+	if title == "" || title == "短剧" {
+		return true
+	}
+	rest, ok := strings.CutPrefix(title, "91porn ")
+	return ok && !strings.Contains(rest, " ")
+}
+
 // ---- 详情 ----
 
 func (d *Downloader) fetchP91Detail(ctx context.Context, sourceID string) (Drama, []Chapter, error) {
@@ -344,6 +666,18 @@ func (d *Downloader) fetchP91Detail(ctx context.Context, sourceID string) (Drama
 	pageText, err := d.p91Get(ctx, pageURL)
 	if err != nil {
 		return Drama{}, nil, err
+	}
+	// 站方按游客身份渲染：身份被复用/被限流时会拿别的片子顶上来，
+	// 表现为「看的是 A，播放的是 B」。换一套游客身份重取一次，
+	// 仍对不上就明说，不把别的片子当成本片放给用户。
+	if !p91PageMatchesViewkey(pageText, sourceID) {
+		p91ResetGuest()
+		if retryText, retryErr := d.p91Get(ctx, pageURL); retryErr == nil {
+			pageText = retryText
+		}
+		if !p91PageMatchesViewkey(pageText, sourceID) {
+			return Drama{}, nil, errors.New("91porn 返回了别的视频（游客身份异常），请重试")
+		}
 	}
 	if strings.Contains(pageText, p91DeletedText) {
 		return Drama{}, nil, errors.New("该视频已删除或被举报")
@@ -659,47 +993,67 @@ func (d *Downloader) resolveP91Media(ctx context.Context, task Task) (providerMe
 	pageURL := p91SiteURL + "/view_video.php?viewkey=" + url.QueryEscape(sourceID)
 
 	// 详情页带出来的地址也可能失效（签名过期 / 站方换节点），先探测；不通就回源重取。
-	if media, err := d.p91PickMedia(ctx, candidates); err == nil {
+	var lastProbeErr error
+	if media, err := d.p91PickMedia(ctx, candidates, pageURL); err == nil {
 		return media, nil
+	} else {
+		lastProbeErr = err
 	}
 
-	pageText, err := d.p91Get(ctx, pageURL)
-	if err != nil {
-		return providerMedia{}, err
-	}
-	fresh, blocked := p91MediaCandidates(pageText, pageURL)
-	candidates = append(candidates, fresh...)
-	media, pickErr := d.p91PickMedia(ctx, candidates)
-	if pickErr == nil {
-		return media, nil
-	}
-
-	// 站方有「有标题、没播放源」的随机渲染：换一个游客标记再渲染一次。
-	retryText, retryErr := d.p91GetWith(ctx, pageURL, "language=cn_CN; ga="+p91GuestMark())
-	if retryErr == nil {
-		again, _ := p91MediaCandidates(retryText, pageURL)
-		candidates = append(candidates, again...)
-		if media, err := d.p91PickMedia(ctx, candidates); err == nil {
+	pageText, pageErr := d.p91Get(ctx, pageURL)
+	blocked := 0
+	if pageErr == nil {
+		fresh, blockedCount := p91MediaCandidates(pageText, pageURL)
+		blocked += blockedCount
+		candidates = append(candidates, fresh...)
+		if media, err := d.p91PickMedia(ctx, candidates, pageURL); err == nil {
 			return media, nil
+		} else {
+			lastProbeErr = err
 		}
 	}
+
+	// ev.php?VID=<viewkey> 是站方「按视频取播放器」的入口：返回内容只对应这一部片，
+	// 不受详情页随机渲染和相关推荐干扰，作为第二来源。
+	evAddress := p91SiteURL + "/ev.php?VID=" + url.QueryEscape(sourceID)
+	if evText, evErr := d.p91Get(ctx, evAddress); evErr == nil {
+		fresh, evBlocked := p91MediaCandidates(evText, evAddress)
+		blocked += evBlocked
+		candidates = append(candidates, fresh...)
+		if media, err := d.p91PickMedia(ctx, candidates, pageURL); err == nil {
+			return media, nil
+		} else {
+			lastProbeErr = err
+		}
+	}
+
+	// 还是不通就换一套游客身份（同一游客站方会缓存/限流），把详情页整页重取一次。
+	p91ResetGuest()
+	if retryText, retryErr := d.p91Get(ctx, pageURL); retryErr == nil {
+		fresh, _ := p91MediaCandidates(retryText, pageURL)
+		candidates = append(candidates, fresh...)
+		if media, err := d.p91PickMedia(ctx, candidates, pageURL); err == nil {
+			return media, nil
+		} else {
+			lastProbeErr = err
+		}
+	}
+
 	if len(candidates) == 0 {
 		if blocked > 0 {
 			return providerMedia{}, errors.New("91porn 只返回了广告占位片，请重试")
 		}
 		return providerMedia{}, errors.New("91porn 未返回可播放地址")
 	}
-	return providerMedia{}, pickErr
-}
-
-// p91GuestMark 给游客标记一个每次不同的值，用来强制站方重新渲染详情页。
-func p91GuestMark() string {
-	return strconv.FormatInt(time.Now().UnixNano()%1_000_000, 10)
+	if lastProbeErr != nil {
+		return providerMedia{}, lastProbeErr
+	}
+	return providerMedia{}, errors.New("91porn 播放地址连不上，请重试")
 }
 
 // p91PickMedia 依次探测候选地址，返回第一条真的能出流的，其余作为备用线路
 // （播放器恢复时会自动换线，用户也可以在清晰度/线路里手动换）。
-func (d *Downloader) p91PickMedia(ctx context.Context, candidates []string) (providerMedia, error) {
+func (d *Downloader) p91PickMedia(ctx context.Context, candidates []string, pageURL string) (providerMedia, error) {
 	if len(candidates) == 0 {
 		return providerMedia{}, errors.New("91porn 未返回可播放地址")
 	}
@@ -718,17 +1072,17 @@ func (d *Downloader) p91PickMedia(ctx context.Context, candidates []string) (pro
 		}
 		seen[address] = true
 		probed++
-		insecure, err := d.p91Probe(probeCtx, address)
+		insecure, err := d.p91Probe(probeCtx, address, pageURL)
 		if err != nil {
 			lastErr = err
 			continue
 		}
-		media := d.p91MediaFor(address, insecure)
+		media := d.p91MediaFor(address, insecure, pageURL)
 		for _, extra := range candidates[index+1:] {
 			if len(media.Variants) >= 2 {
 				break
 			}
-			media.Variants = append(media.Variants, d.p91MediaFor(extra, false))
+			media.Variants = append(media.Variants, d.p91MediaFor(extra, false, pageURL))
 		}
 		return media, nil
 	}
@@ -738,59 +1092,63 @@ func (d *Downloader) p91PickMedia(ctx context.Context, candidates []string) (pro
 	return providerMedia{}, fmt.Errorf("91porn 播放地址连不上（%s），请重试", p91ProbeReason(lastErr))
 }
 
-func (d *Downloader) p91MediaFor(address string, insecure bool) providerMedia {
+// p91MediaFor 组装播放凭据。Referer 用具体的详情页而不是首页：
+// 站方 CDN 按 Referer 判定来源，给首页地址时部分节点只放行前一小段就掐断，
+// 表现为「播几秒就中断」，而同一部片用详情页地址能完整拉完。
+func (d *Downloader) p91MediaFor(address string, insecure bool, referer string) providerMedia {
+	if strings.TrimSpace(referer) == "" {
+		referer = p91SiteURL + "/"
+	}
 	return providerMedia{
 		URL:     address,
-		Referer: p91SiteURL + "/",
+		Referer: referer,
 		credentials: &providerMediaCredentials{
-			cookie:      p91Cookie,
-			referer:     p91SiteURL + "/",
+			cookie:      p91CookieHeader(),
+			referer:     referer,
 			userAgent:   p91UserAgent,
 			insecureTLS: insecure,
+			// 站方 CDN 会掐长连接（看几秒到几十秒就断），播放端看到的就是「传输中断」。
+			// 标记成可续传，本地中转在断点处自动重新拉一段，播放器不用重连。
+			resilient:  true,
+			sendCookie: true,
 		},
 	}
 }
 
-// p91Probe 确认直链真的能出流：先 HEAD（不消耗流量、多数 CDN 不算播放量），
-// HEAD 被拒再退到 1 段 Range GET。
+// p91Probe 确认直链真的能出流。
+// 只用 GET 拉前 4KB：HEAD 常常「通」但真拉流被拒/被断，用它判断会误判成可用。
 // 站方 CDN（*.91p52.com）证书链不完整（缺中间证书），标准校验会失败但流本身可播，
 // 所以遇到证书错误时用「跳过校验」再试一次，成功就记住这个源要走宽松传输。
-func (d *Downloader) p91Probe(ctx context.Context, address string) (bool, error) {
+func (d *Downloader) p91Probe(ctx context.Context, address, referer string) (bool, error) {
+	if strings.TrimSpace(referer) == "" {
+		referer = p91SiteURL + "/"
+	}
 	var lastErr error
 	for _, insecure := range []bool{false, true} {
-		if err := d.p91ProbeHeadOrGet(ctx, address, insecure); err == nil {
+		err := d.p91ProbeOnce(ctx, address, referer, insecure)
+		if err == nil {
 			return insecure, nil
-		} else {
-			lastErr = err
-			if !p91CertificateError(err) {
-				return false, err
-			}
+		}
+		lastErr = err
+		if !p91CertificateError(err) {
+			return false, err
 		}
 	}
 	return false, lastErr
 }
 
-func (d *Downloader) p91ProbeHeadOrGet(ctx context.Context, address string, insecure bool) error {
-	err := d.p91ProbeOnce(ctx, address, http.MethodHead, insecure)
-	if err == nil || p91CertificateError(err) {
-		return err
-	}
-	return d.p91ProbeOnce(ctx, address, http.MethodGet, insecure)
-}
-
-func (d *Downloader) p91ProbeOnce(ctx context.Context, address, method string, insecure bool) error {
+func (d *Downloader) p91ProbeOnce(ctx context.Context, address, referer string, insecure bool) error {
 	probeCtx, cancel := context.WithTimeout(ctx, 7*time.Second)
 	defer cancel()
-	request, err := http.NewRequestWithContext(probeCtx, method, address, nil)
+	request, err := http.NewRequestWithContext(probeCtx, http.MethodGet, address, nil)
 	if err != nil {
 		return err
 	}
 	request.Header.Set("User-Agent", p91UserAgent)
-	request.Header.Set("Referer", p91SiteURL+"/")
+	request.Header.Set("Referer", referer)
 	request.Header.Set("Accept", "*/*")
-	if method == http.MethodGet {
-		request.Header.Set("Range", "bytes=0-4095")
-	}
+	request.Header.Set("Cookie", p91CookieHeader())
+	request.Header.Set("Range", "bytes=0-65535")
 
 	client := *d.client
 	client.Timeout = 8 * time.Second
@@ -805,19 +1163,16 @@ func (d *Downloader) p91ProbeOnce(ctx context.Context, address, method string, i
 	if response.StatusCode != http.StatusOK && response.StatusCode != http.StatusPartialContent {
 		return fmt.Errorf("91porn 直链返回 HTTP %d", response.StatusCode)
 	}
-	if method == http.MethodHead {
-		if response.ContentLength == 0 {
-			return errors.New("91porn 直链返回空内容")
-		}
-		return nil
+	if contentType := strings.ToLower(response.Header.Get("Content-Type")); strings.Contains(contentType, "text/html") {
+		return errors.New("91porn 直链返回的是网页而不是视频")
 	}
-	buffer := make([]byte, 512)
-	read, readErr := io.ReadFull(response.Body, buffer)
+	buffer := make([]byte, 4096)
+	read, readErr := io.ReadFull(io.LimitReader(response.Body, int64(len(buffer))), buffer)
 	if readErr != nil && readErr != io.ErrUnexpectedEOF && readErr != io.EOF {
 		return readErr
 	}
-	if read == 0 {
-		return errors.New("91porn 直链返回空内容")
+	if read < 512 {
+		return errors.New("91porn 直链返回内容过短")
 	}
 	return nil
 }

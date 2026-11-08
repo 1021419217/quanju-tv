@@ -421,6 +421,12 @@ func (stream *nativeStreamServer) nativeServe(writer http.ResponseWriter, reques
 	}
 	writer.WriteHeader(response.StatusCode)
 	if request.Method == http.MethodGet {
+		// 标记了 resilient 的源（站方 CDN 会掐长连接）走断点续传中转：
+		// 上游断开时从断点再拉一段，播放器不会看到「传输中断」。
+		if session.credentials != nil && session.credentials.resilient {
+			stream.nativeRelayBody(ctx, writer, request.Method, upstream, finalURL, response, reader, info)
+			return
+		}
 		_, _ = io.Copy(writer, reader)
 	}
 }

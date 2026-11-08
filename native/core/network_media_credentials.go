@@ -19,6 +19,12 @@ type providerMediaCredentials struct {
 	// insecureTLS 只给证书链不完整的站点用（缺中间证书，标准校验必失败但流可播）。
 	// 由站源探测到证书错误并确认「跳过校验能出流」后显式打开，默认关闭。
 	insecureTLS bool
+	// sendCookie 让 Cookie 跟着每一跳走（含跨域 CDN）。站源把播放地址放在自家
+	// CDN 上、且 CDN 也要校验游客 Cookie 时才打开；默认只在同源请求里带。
+	sendCookie bool
+	// resilient 表示上游会掐断长连接，本地中转要断点续传而不是把错误抛给播放器。
+	// 只有站源显式标记时才走续传路径，其它源保持原样。
+	resilient bool
 }
 
 type providerMediaCredentialsKey struct{}
@@ -50,11 +56,13 @@ func (credentials *providerMediaCredentials) apply(request *http.Request) error 
 			request.Header.Set("Origin", providerMediaOrigin(address))
 		}
 	}
-	if providerMediaOrigin(request.URL) == credentials.origin {
+	if credentials.sendCookie || providerMediaOrigin(request.URL) == credentials.origin {
 		if !credentials.expires.IsZero() && !time.Now().Before(credentials.expires) {
 			return errors.New("播放凭证已过期，请重新解析播放")
 		}
-		request.Header.Set("Cookie", credentials.cookie)
+		if credentials.cookie != "" {
+			request.Header.Set("Cookie", credentials.cookie)
+		}
 	}
 	return nil
 }

@@ -183,7 +183,13 @@ class _AppShellState extends State<AppShell>
       _armExit();
       return;
     }
-    if (_tab == AppTab.explore) _explore.currentState?.refresh();
+    // 切回首页时不再强制刷新列表。
+    //
+    // 原先这里会调 refresh() 绕过缓存重拉第一页，理由是「回来能看到最新内容」。
+    // 但对 91porn 这类每次请求排序都不同的站源，重拉一次就等于整页重排：
+    // 用户刚看过的条目会被挤到下面，主观感受就是「明明看的是 A，回来位置全变了」。
+    // 首页数据本来就是缓存 + 15 分钟 TTL，需要最新内容时用户长按底栏「发现」
+    // 或下拉即可主动刷新，不必在切 tab 时偷偷替换列表。
     _select(AppTab.explore);
     if (television) _tabFocus.first.requestFocus();
   }

@@ -7,7 +7,6 @@ import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
-import '../../app_device.dart';
 import '../../local_store.dart';
 import '../../models.dart';
 import '../../playback_session.dart';
@@ -23,12 +22,6 @@ import 'player_gestures.dart';
 import 'player_surface.dart';
 
 const _maskHeight = 68.0;
-
-/// 左侧亮度区的右边界（占播放区宽度），和横屏播放器的左半屏一致。
-///
-/// 长按画面任意处（左侧亮度区除外）为「临时倍速，松手恢复、下滑锁定」，
-/// 亮度从五分之一到一半之间生效；播放设置改由底部「设置」选项卡打开。
-const _brightnessZone = .5;
 
 String _status(Drama drama) =>
     drama.releaseLabel == '状态未知' ? '' : '${drama.releaseLabel} · ';
@@ -63,12 +56,12 @@ class _PortraitPlayerPageState extends State<PortraitPlayerPage>
   double? _seekTarget;
   Timer? _seekTimer;
 
-  /// 竖屏的滑动调亮度/快进快退，行为与横屏播放器一致；
-  /// 但竖屏短促的上下滑是切集，所以亮度要「长按后」才接管，
-  /// 右半屏竖滑也留给翻页，不再调音量。
+  /// 竖屏：左右滑快进快退，短促上下滑翻页切集。
+  ///
+  /// 亮度/音量不在竖屏接管——长按画面任意位置都是临时倍速，
+  /// 没有「先长按再上下滑调亮度」这层入口了。
   late final PlayerGestures _gestures = PlayerGestures(
     session: _session,
-    brightnessZone: _brightnessZone,
     volumeSwipe: false,
     requireHold: true,
   );
@@ -204,18 +197,11 @@ class _PortraitPlayerPageState extends State<PortraitPlayerPage>
     });
   }
 
-  void _pressStart(LongPressStartDetails details, double width) {
-    final x = details.localPosition.dx;
-    if (x >= width / 5 && x < width * _brightnessZone && AppDevice.brightnessSupported) {
-      // 左侧亮度区：长按后上下滑调亮度、左右滑快进快退；
-      // 短促的上下滑仍然是翻页切集，因为这里不抢手势、只等长按成立。
-      _gestures.hold();
-      unawaited(HapticFeedback.selectionClick());
-      return;
-    }
-    // 其余区域（含最左侧）：长按即临时倍速，松手恢复，下滑锁定倍速档位。
-    // 播放设置不再从长按进入，改由底部「设置」选项卡按钮打开。
-    // 倍速期间挂起横向快进，避免按住倍速时手轻微抖动被结算成快进/快退。
+  void _pressStart() {
+    // 长按屏幕任意位置都是临时倍速，不再按左右区域分流：
+    // 之前竖屏左侧 1/5~1/2 宽度是亮度区，在那一带长按只会进亮度模式、不出倍速，
+    // 用户感知就是「中间一按就倍速，两边按半天没反应」。现在统一走倍速，
+    // 亮度/音量不再从长按进入（竖屏的上下滑仍然只切集）。
     _gestures.setSeekSuspended(true);
     if (!_session.boostLocked) _session.holdBoost();
     unawaited(HapticFeedback.selectionClick());
@@ -376,8 +362,7 @@ class _PortraitPlayerPageState extends State<PortraitPlayerPage>
                       if (_gestures.suppressTap) return;
                       session.togglePlayback();
                     },
-                    onLongPressStart: (details) =>
-                        _pressStart(details, width),
+                    onLongPressStart: (_) => _pressStart(),
                     onLongPressMoveUpdate: _pressMove,
                     onLongPressEnd: (_) => _pressEnd(),
                     onLongPressCancel: _pressEnd,

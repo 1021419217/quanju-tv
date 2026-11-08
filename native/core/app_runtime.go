@@ -857,7 +857,13 @@ func (engine *nativeEngine) nativeDetail(ctx context.Context, drama nativeDrama)
 		drama.Title = title
 	}
 	if raw.ID == drama.ID {
-		drama = mergeNativeDrama(drama, nativeNormalize(raw))
+		if source == sourceP91 {
+			// 91porn 详情页会按游客身份随机渲染，偶尔给出另一部片的标题/封面。
+			// 列表卡片才是用户点的那一条，标题/封面以列表为准，详情只补空字段。
+			drama = mergeP91Detail(drama, nativeNormalize(raw))
+		} else {
+			drama = mergeNativeDrama(drama, nativeNormalize(raw))
+		}
 	}
 	if source == sourceHongguo {
 		raw := engine.downloader.hongguoCachedDrama(Drama{ID: drama.ID, Title: drama.Title, Source: source})

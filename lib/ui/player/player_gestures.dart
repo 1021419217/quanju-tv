@@ -111,7 +111,10 @@ class PlayerGestures extends ChangeNotifier {
   bool get suppressTap => DateTime.now().isBefore(_ignoreTapUntil);
 
   /// [requireHold] 模式下，长按已开启本次手势的上下调节。
-  bool get _canAdjust => _held || !requireHold;
+  ///
+  /// 临时倍速长按期间（[_seekSuspended]）一律不接管上下调节：
+  /// 长按的画面就是要倍速，手指按住时的轻微上下抖动不该顺手把亮度/音量改掉。
+  bool get _canAdjust => (_held || !requireHold) && !_seekSuspended;
 
   /// 长按开始：竖屏里先长按、再上下滑才调亮度，短促上下滑继续交给翻页切集。
   void hold() {
@@ -195,6 +198,7 @@ class PlayerGestures extends ChangeNotifier {
 
     // 已经进入亮度档：只认上下滑动，左右滑动不再改判成快进。
     if (_brightnessMode) {
+      if (_seekSuspended) return;
       final ratio = dy / (_viewHeight * .6);
       _brightness = (_brightnessStart + ratio).clamp(.01, 1.0);
       unawaited(AppDevice.setBrightness(_brightness));
@@ -524,9 +528,9 @@ class PlayerHoldGesture extends StatelessWidget {
     this.onLongPressCancel,
   });
 
-  /// 长按倍速触发时长。系统默认 500ms 偏慢，缩到 260ms 明显跟手，
-  /// 又留一点余量避免正常点按被误判成长按。
-  static const Duration holdDuration = Duration(milliseconds: 260);
+  /// 长按倍速触发时长。系统默认 500ms 偏慢，缩到 240ms 明显跟手，
+  /// 又留一点余量避免正常点按（以及双击全屏的第二下）被误判成长按。
+  static const Duration holdDuration = Duration(milliseconds: 240);
 
   /// 三个播放页原本用的是无 child 的 GestureDetector（靠 behavior: opaque
   /// 自己占满父区域），所以这里 child 必须可选；缺省时给一个占满容器的空盒，

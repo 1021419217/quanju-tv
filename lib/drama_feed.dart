@@ -61,12 +61,31 @@ class DramaFeed extends ChangeNotifier {
   }
 
   void update(Drama drama) {
-    if (!_items.any((item) => item.id == drama.id)) return;
+    final index = _items.indexWhere((item) => item.id == drama.id);
+    if (index < 0) return;
+    final merged = _items[index].merge(drama);
+    // 详情页加载完会把补全后的条目推回来。多数时候只补了一两个字段，
+    // 这时候重建整格会让封面重新加载、整屏闪一下；没有实质变化就不通知。
+    if (_sameDrama(merged, _items[index])) return;
     _items = [
-      for (final item in _items) item.id == drama.id ? item.merge(drama) : item,
+      for (var i = 0; i < _items.length; i++)
+        i == index ? merged : _items[i],
     ];
     _notify();
   }
+
+  bool _sameDrama(Drama a, Drama b) =>
+      a.title == b.title &&
+      a.cover == b.cover &&
+      a.description == b.description &&
+      a.episodes == b.episodes &&
+      a.category == b.category &&
+      a.vipStatus == b.vipStatus &&
+      a.heat == b.heat &&
+      a.views == b.views &&
+      a.onlineDate == b.onlineDate &&
+      a.releaseStatus == b.releaseStatus &&
+      listEquals(a.tags, b.tags);
 
   Future<void> _fetch(
     int generation, {
