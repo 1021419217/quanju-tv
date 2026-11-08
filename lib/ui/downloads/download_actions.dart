@@ -31,7 +31,13 @@ Future<bool> downloadEpisodes(
       episodes,
     );
     messenger.showSnackBar(
-      SnackBar(content: Text(added == 0 ? '所选剧集已在下载列表中' : '已加入下载 $added 集')),
+      SnackBar(
+        content: Text(
+          added == 0
+              ? '所选剧集已在下载列表中，可在「我的 → 下载」查看'
+              : '已加入下载 $added 集，可在「我的 → 下载」查看进度',
+        ),
+      ),
     );
     return true;
   } catch (error) {
