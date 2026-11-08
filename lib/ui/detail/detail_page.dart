@@ -857,14 +857,14 @@ class _DetailPageState extends State<DetailPage> {
                     overflow: TextOverflow.ellipsis,
                     style: sub.copyWith(fontSize: m.meta),
                   ),
-                  if (drama.category.isNotEmpty)
+                  if (drama.category.isNotEmpty && drama.source != 'xchina-live')
                     Text(
                       drama.category,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: sub,
                     ),
-                  if (drama.onlineDate.isNotEmpty)
+                  if (drama.onlineDate.isNotEmpty && drama.source != 'xchina-live')
                     Text('${drama.onlineDate} 上线', style: sub),
                   if (drama.tags.isNotEmpty)
                     Padding(
@@ -1075,7 +1075,8 @@ class _DetailPageState extends State<DetailPage> {
           ),
         ),
         Text(meta.join(' · '), style: sub(m.meta)),
-        if (drama.category.isNotEmpty) Text(drama.category, style: sub(m.meta)),
+        if (drama.category.isNotEmpty && drama.source != 'xchina-live')
+          Text(drama.category, style: sub(m.meta)),
         if (drama.source == 'huangdou')
           Text(
             drama.vipStatus == null

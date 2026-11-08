@@ -755,8 +755,8 @@ func (engine *nativeEngine) nativeCatalog(ctx context.Context, input nativeInput
 	case sourceXChina:
 		items, result.HasMore, err = d.fetchXChinaCatalogPage(ctx, page, category, "")
 	case sourceXChinaLive:
-		// 实时源不认分类，固定打 recent 时间倒序流。
-		items, result.HasMore, err = d.fetchXChinaLiveCatalogPage(ctx, page)
+		// 默认（全部）走 recent 时间倒序流；具体分类按站方 type 取。
+		items, result.HasMore, err = d.fetchXChinaLiveCatalogPage(ctx, page, category)
 	case sourceTheporny:
 		items, result.HasMore, err = d.fetchThepornyCatalogPage(ctx, page, category, "")
 	case sourceJinguoDuanju:

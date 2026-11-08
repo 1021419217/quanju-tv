@@ -40,10 +40,14 @@ class SourceCatalog {
     final topics = remote.any(
       (category) => category.id.startsWith(topicPrefix),
     );
+    // 「XChina·实时」的条目副标题是站方给的时间/播放量，category 也不代表
+    // 内容分类；把它排除在本地分类聚合之外，分类栏只保留站方真实分类。
     final local = topics
         ? const <String>[]
         : ({
-            for (final drama in _library.values) categoryName(drama.category),
+            for (final drama in _library.values)
+              if (drama.source != SourceSite.xchinaLive.id)
+                categoryName(drama.category),
           }.where(names.add).toList()..sort());
     return [
       CatalogCategory.all,

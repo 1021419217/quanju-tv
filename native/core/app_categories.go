@@ -93,8 +93,8 @@ func validNativeCategory(source, category string) bool {
 	case sourceXChina:
 		return validXChinaCategory(category)
 	case sourceXChinaLive:
-		// 实时源只有「全部」，固定走 recent 时间倒序流，不接受其它分类。
-		return false
+		// 与 xchina 共用同一套站方分类，缺失/未知时回落「全部」实时流。
+		return validXChinaCategory(category)
 	case sourceTheporny:
 		_, ok := validThepornyCategory(category)
 		return ok
@@ -128,7 +128,10 @@ func (engine *nativeEngine) nativeCategories(ctx context.Context, source string,
 	case sourceHuangdou:
 		return all, nil
 	case sourceXChinaLive:
-		// 实时源只提供「全部」一个入口，目录固定按上传时间倒序。
+		// 与 xchina 一致的站方真实内容分类；「全部」保持 recent 时间倒序流。
+		for _, entry := range xchinaCategoryEntries {
+			all = append(all, nativeCategory{ID: entry.ID, Name: entry.Name})
+		}
 		return all, nil
 	}
 	if isCustomMaccmsSource(source) {

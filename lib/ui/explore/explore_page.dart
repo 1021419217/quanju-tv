@@ -476,6 +476,13 @@ class ExplorePageState extends State<ExplorePage>
                 width: constraints.maxWidth - inset * 2,
                 items: items,
                 rankOf: explore.rankOf,
+                // 「XChina·实时」的副标题用站方 tags（如「1 分钟前 | 6700次播放」），
+                // 直接反映新旧与热度；其它源保持默认（分类名）。
+                subtitleOf: (drama) =>
+                    drama.source == SourceSite.xchinaLive.id &&
+                        drama.tags.isNotEmpty
+                    ? drama.tags.first
+                    : null,
                 autofocus: television && hero == null,
                 onOpen: _open,
               ),
@@ -544,7 +551,10 @@ class ExplorePageState extends State<ExplorePage>
         carousel: slides(drama),
         kicker: '今日推荐',
         meta: [
-          if (drama.category.isNotEmpty) drama.category,
+          if (drama.source == SourceSite.xchinaLive.id && drama.tags.isNotEmpty)
+            drama.tags.first
+          else if (drama.category.isNotEmpty)
+            drama.category,
           if (drama.episodes > 0) '共 ${drama.episodes} 集',
         ].join(' · '),
         action: '立即观看',

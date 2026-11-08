@@ -443,11 +443,14 @@ func xchinaPlaylist(row map[string]any) string {
 
 // ---- XChina 实时上新源（sourceXChinaLive）----
 //
-// 与 xchina 共用同一套加密请求、解密与播放链路，差异只有两点：
-// 1. 目录固定打 /sevenVideos?type=recent（站方按上传时间倒序的实时流），
-//    不看用户选的分类；
-// 2. 剧集 ID 前缀换成 xchina-live，卡片副标题显示站方给的相对时间（如「38分钟前」），
-//    方便刷新后一眼判断有没有上新内容。
+// 与 xchina 共用同一套加密请求、解密与播放链路，差异只有三点：
+// 1. 默认分类（全部）固定打 /sevenVideos?type=recent（站方按上传时间倒序的实时流）；
+// 2. 剧集 ID 前缀换成 xchina-live，与 xchina 的缓存/历史互不串；
+// 3. 第一页整体替换而非追加旧条目，刷新后不会越刷越长。
+//
+// 注意：卡片副标题（nativeDrama.Category）必须保持站方的真实类型，
+// 不能塞相对时间——界面的分类栏由列表条目的 category 聚合而来，
+// 一旦写入「38分钟前」这类会变的文本，就会被当成一个个新分类（见 3.10 实测）。
 
 // xchinaCreatedAt 取条目的上传时间（秒或毫秒时间戳），取不到返回 0。
 func xchinaCreatedAt(row map[string]any) int64 {
@@ -475,33 +478,46 @@ func xchinaLiveDrama(row map[string]any, client *xchinaClient) Drama {
 	drama.ID = providerDramaID(sourceXChinaLive, drama.SourceID)
 	drama.Source = sourceXChinaLive
 	drama.ChannelName = "XChina 实时"
-	// 卡片第二行渲染的是 category（回落到 typeName），这里放相对时间，
-	// 让「刷新有没有上新」直接可见；原始类型挪到 tags 里保留。
+	// TypeName（站方 videoType）保持不动，它就是分类归属。
+	// 相对时间只写进 OnlineDate，绝不进 category——界面的分类栏由列表条目的
+	// category 聚合而来，写入「38分钟前」会被当成一个个新分类（3.10 实测）。
 	if relative := strings.TrimSpace(mapString(row, "time")); relative != "" {
-		drama.TypeName = relative
 		drama.OnlineDate = relative
 	}
-	if kind := strings.TrimSpace(mapString(row, "videoType")); kind != "" {
-		drama.Tags = append(drama.Tags, kind)
+	// 站方 tags 形如「1 分钟前 | 6700次播放」，卡片副标题直接用它，
+	// 比 videoType（tvideo）有用；只放 tags，不参与分类归属。
+	if tags := strings.TrimSpace(mapString(row, "tags")); tags != "" {
+		drama.Tags = []string{tags}
 	}
 	return drama
 }
 
-func (d *Downloader) fetchXChinaLiveCatalogPage(ctx context.Context, page int) ([]Drama, bool, error) {
+func (d *Downloader) fetchXChinaLiveCatalogPage(ctx context.Context, page int, category string) ([]Drama, bool, error) {
 	if page < 1 {
 		page = 1
 	}
+	// 「全部」= 站方 recent 时间倒序流；选了具体分类就按站方分类取。
+	kind := strings.TrimSpace(category)
+	if !validXChinaCategory(kind) {
+		kind = "recent"
+	}
+	// 5mins / 10mins 已从分类栏下线，不再作为入口（旧选中态回落最新）。
+	if kind == "5mins" || kind == "10mins" {
+		kind = "recent"
+	}
 	client := d.xchina()
-	decoded, err := client.call(ctx, d, "/sevenVideos?page="+strconv.Itoa(page)+"&type=recent", nil)
+	decoded, err := client.call(ctx, d, "/sevenVideos?page="+strconv.Itoa(page)+"&type="+url.QueryEscape(kind), nil)
 	if err != nil {
 		return nil, false, err
 	}
 	rows := xchinaRows(decoded)
-	// 站方本身已按时间倒序返回；再按 createdTime 稳定降序一次，
-	// 避免偶发乱序让「第一条不是最新」。
-	sort.SliceStable(rows, func(i, j int) bool {
-		return xchinaCreatedAt(rows[i]) > xchinaCreatedAt(rows[j])
-	})
+	// 实时流再按 createdTime 稳定降序一次，避免偶发乱序让「第一条不是最新」；
+	// 热度/榜单类分类保持站方原有排序，重排会破坏榜单语义。
+	if kind == "recent" {
+		sort.SliceStable(rows, func(i, j int) bool {
+			return xchinaCreatedAt(rows[i]) > xchinaCreatedAt(rows[j])
+		})
+	}
 	items := make([]Drama, 0, len(rows))
 	for _, row := range rows {
 		if drama := xchinaLiveDrama(row, client); drama.ID != "" {
