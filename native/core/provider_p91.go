@@ -84,7 +84,9 @@ func p91CategoryName(category string) string {
 }
 
 var (
-	p91ViewkeyRE    = regexp.MustCompile(`view_video(?:_hd)?\.php\?viewkey=([0-9a-zA-Z]+)`)
+	// 作者页/收藏页的链接带前置参数（view_video.php?own=1&viewkey=...），
+	// 早期只认「?viewkey=」导致这类页面一个 viewkey 都取不到、整页空白。
+	p91ViewkeyRE    = regexp.MustCompile(`view_video(?:_hd)?\.php\?(?:[^"'\s>]*?&)?viewkey=([0-9a-zA-Z]+)`)
 	p91TitleRE      = regexp.MustCompile(`(?s)<span[^>]*class="[^"]*video-title[^"]*"[^>]*>(.*?)</span>`)
 	p91TitleLinkRE  = regexp.MustCompile(`(?is)<a\b[^>]*class\s*=\s*"[^"]*video-title[^"]*"[^>]*>(.*?)</a>`)
 	p91AnchorOpenRE = regexp.MustCompile(`(?is)<a\b[^>]*class\s*=\s*"[^"]*video-title[^"]*"[^>]*>`)
@@ -93,9 +95,10 @@ var (
 	p91ThumbRE      = regexp.MustCompile(`<img[^>]+src="([^"]+)"`)
 	p91DurationRE   = regexp.MustCompile(`<span class="duration">\s*([0-9:]+)\s*</span>`)
 	p91FromRE       = regexp.MustCompile(`<span class="info">From:</span>\s*([^<]*)`)
-	// 作者的 UID 藏在 uvideos.php 链接里，详情页与列表卡片都是这个形态。
-	p91UIDRE        = regexp.MustCompile(`uvideos\.php\?UID=([0-9A-Za-z_-]+)`)
-	p91AuthorLinkRE = regexp.MustCompile(`(?is)<a[^>]+uvideos\.php\?UID=[^>]*>([^<]*)</a>`)
+	// 作者的 UID 藏在 uprofile.php / uvideos.php 链接里：站方 2026 年换成了
+	// uprofile.php，旧路径仍出现在收藏夹与老页面，两种都要认。
+	p91UIDRE        = regexp.MustCompile(`u(?:profile|videos)\.php\?UID=([0-9A-Za-z_-]+)`)
+	p91AuthorLinkRE = regexp.MustCompile(`(?is)<a[^>]+u(?:profile|videos)\.php\?UID=[^>]*>(.*?)</a>`)
 	p91TagRE        = regexp.MustCompile(`<[^>]*>`)
 
 	// 用 div 配对切卡片：站方会在列表里插「混淆卡片」（外层容器带 col-lg-8，
@@ -276,6 +279,14 @@ func (d *Downloader) p91Get(ctx context.Context, rawURL string) (string, error) 
 
 // p91GetWith 允许带一份额外 Cookie（用于换游客标记重新渲染，正常情况下传空）。
 func (d *Downloader) p91GetWith(ctx context.Context, rawURL, extraCookie string) (string, error) {
+	body, _, err := d.p91GetFinal(ctx, rawURL, extraCookie)
+	return body, err
+}
+
+// p91GetFinal 与 p91GetWith 相同，但额外返回「重定向后的最终地址」。
+// 91 的入口域名会两级跳转（meta refresh → 302），只有拿到最终地址才能
+// 判断当前落地域名，进而给媒体请求拼对 Referer。
+func (d *Downloader) p91GetFinal(ctx context.Context, rawURL, extraCookie string) (string, string, error) {
 	retries := d.cfg.Retries
 	if retries <= 0 {
 		retries = 3
@@ -283,18 +294,18 @@ func (d *Downloader) p91GetWith(ctx context.Context, rawURL, extraCookie string)
 	var lastErr error
 	for attempt := 1; attempt <= retries; attempt++ {
 		if err := ctx.Err(); err != nil {
-			return "", err
+			return "", "", err
 		}
 		if attempt > 1 {
 			select {
 			case <-time.After(time.Duration(attempt) * 600 * time.Millisecond):
 			case <-ctx.Done():
-				return "", ctx.Err()
+				return "", "", ctx.Err()
 			}
 		}
 		request, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 		if err != nil {
-			return "", err
+			return "", "", err
 		}
 		cookie := p91CookieHeader()
 		if extra := strings.TrimSpace(extraCookie); extra != "" {
@@ -303,7 +314,7 @@ func (d *Downloader) p91GetWith(ctx context.Context, rawURL, extraCookie string)
 		request.Header.Set("User-Agent", p91UserAgent)
 		request.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
 		request.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
-		request.Header.Set("Referer", p91SiteURL+"/")
+		request.Header.Set("Referer", p91OriginOf(rawURL)+"/")
 		request.Header.Set("Cookie", cookie)
 		response, err := d.doPreparedCatalogRequest(request, 20*time.Second, nil)
 		if err != nil {
@@ -321,12 +332,108 @@ func (d *Downloader) p91GetWith(ctx context.Context, rawURL, extraCookie string)
 			lastErr = fmt.Errorf("91porn 返回 HTTP %d", response.StatusCode)
 			continue
 		}
-		return p91DecodeBody(body), nil
+		final := rawURL
+		if response.Request != nil && response.Request.URL != nil {
+			final = response.Request.URL.String()
+		}
+		return p91DecodeBody(body), final, nil
 	}
 	if lastErr == nil {
 		lastErr = errors.New("91porn 请求失败")
 	}
-	return "", lastErr
+	return "", "", lastErr
+}
+
+// p91OriginOf 取一段地址的 scheme://host；解析失败时返回空串。
+func p91OriginOf(raw string) string {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return ""
+	}
+	return parsed.Scheme + "://" + parsed.Host
+}
+
+var p91MetaRefreshRE = regexp.MustCompile(`(?is)<meta[^>]+http-equiv=["']?refresh["']?[^>]*content=["'][^"']*url=([^"'>\s]+)`)
+
+// p91MetaRefreshTarget 取入口页里的 meta refresh 跳转地址。
+// 91 的镜像域名只做一层跳板，真实站点在跳转后的落地域名上。
+func p91MetaRefreshTarget(pageText string) string {
+	match := p91MetaRefreshRE.FindStringSubmatch(pageText)
+	if len(match) < 2 {
+		return ""
+	}
+	return strings.TrimSpace(match[1])
+}
+
+// 91 的域名一直在换：91porn.com 被墙，站方把流量导到 9p234.com / sp2026.com
+// 这类镜像，镜像再 meta refresh 到当天的落地域名。写死任何一个都会过期，
+// 所以探测一次、缓存半小时。探测失败就退回原来的 p91SiteURL，行为不变。
+var p91BaseState struct {
+	mu   sync.Mutex
+	base string
+	at   time.Time
+}
+
+const p91BaseTTL = 30 * time.Minute
+
+var p91BaseSeeds = []string{p91SiteURL, "https://9p234.com", "https://sp2026.com"}
+
+func (d *Downloader) p91BaseURL(ctx context.Context) string {
+	p91BaseState.mu.Lock()
+	base, at := p91BaseState.base, p91BaseState.at
+	p91BaseState.mu.Unlock()
+	if base != "" && time.Since(at) < p91BaseTTL {
+		return base
+	}
+	resolved := d.p91DiscoverBase(ctx)
+	p91BaseState.mu.Lock()
+	p91BaseState.base, p91BaseState.at = resolved, time.Now()
+	p91BaseState.mu.Unlock()
+	return resolved
+}
+
+func (d *Downloader) p91DiscoverBase(ctx context.Context) string {
+	for _, seed := range p91BaseSeeds {
+		if base, ok := d.p91ProbeBase(ctx, seed); ok {
+			return base
+		}
+	}
+	return p91SiteURL
+}
+
+func (d *Downloader) p91ProbeBase(ctx context.Context, seed string) (string, bool) {
+	probeCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	defer cancel()
+	body, final, err := d.p91GetFinal(probeCtx, strings.TrimRight(seed, "/")+"/", "")
+	if err != nil {
+		return "", false
+	}
+	if target := p91MetaRefreshTarget(body); target != "" {
+		next := target
+		if !strings.HasPrefix(next, "http") {
+			next = strings.TrimRight(p91OriginOf(final), "/") + "/" + strings.TrimLeft(next, "/")
+		}
+		if page, pageFinal, nextErr := d.p91GetFinal(probeCtx, next, ""); nextErr == nil {
+			body, final = page, pageFinal
+		}
+	}
+	base := p91OriginOf(final)
+	if base == "" {
+		return "", false
+	}
+	if !strings.Contains(body, "videos-text-align") {
+		// 落地页多半是年龄确认页，index.php 才是真正的列表。
+		if page, pageFinal, pageErr := d.p91GetFinal(probeCtx, base+"/index.php", ""); pageErr == nil {
+			body = page
+			if origin := p91OriginOf(pageFinal); origin != "" {
+				base = origin
+			}
+		}
+	}
+	if strings.Contains(body, "videos-text-align") {
+		return base, true
+	}
+	return "", false
 }
 
 // p91DecodeBody 老页面是 GBK/GB18030，新页面是 UTF-8，按声明转码。
@@ -377,7 +484,7 @@ func (d *Downloader) fetchP91CatalogPage(ctx context.Context, page int, category
 	if !validP91Category(category) {
 		category = "rf"
 	}
-	address := p91SiteURL + "/v.php?category=" + url.QueryEscape(category) +
+	address := d.p91BaseURL(ctx) + "/v.php?category=" + url.QueryEscape(category) +
 		"&viewtype=basic&page=" + fmt.Sprint(page)
 	pageText, err := d.p91Get(ctx, address)
 	if err != nil {
@@ -392,7 +499,7 @@ func (d *Downloader) searchP91(ctx context.Context, query string, page int) ([]D
 	if query == "" {
 		return nil, false, errors.New("请输入搜索内容")
 	}
-	address := p91SiteURL + "/search_result.php?search_id=" + url.QueryEscape(query) +
+	address := d.p91BaseURL(ctx) + "/search_result.php?search_id=" + url.QueryEscape(query) +
 		"&search_type=search_videos&viewtype=basic"
 	if page > 1 {
 		address += "&page=" + fmt.Sprint(page)
@@ -710,7 +817,7 @@ func (d *Downloader) fetchP91Detail(ctx context.Context, sourceID string) (Drama
 	if sourceID == "" || strings.ContainsAny(sourceID, "/?#& ") {
 		return Drama{}, nil, errors.New("91porn 视频 ID 无效")
 	}
-	pageURL := p91SiteURL + "/view_video.php?viewkey=" + url.QueryEscape(sourceID)
+	pageURL := d.p91BaseURL(ctx) + "/view_video.php?viewkey=" + url.QueryEscape(sourceID)
 	pageText, err := d.p91Get(ctx, pageURL)
 	if err != nil {
 		return Drama{}, nil, err
@@ -1050,12 +1157,16 @@ func (d *Downloader) resolveP91Media(ctx context.Context, task Task) (providerMe
 	if sourceID == "" || strings.ContainsAny(sourceID, "/?#& ") {
 		return providerMedia{}, errors.New("91porn 播放请求缺少有效的视频 ID")
 	}
-	pageURL := p91SiteURL + "/view_video.php?viewkey=" + url.QueryEscape(sourceID)
-
 	// 详情页已经解析出地址：直接起播，和笔盒一样不再多发一个请求。
+	// 这里连域名探测都不能做——探测本身也是一个网络请求。
 	if len(candidates) > 0 {
-		return d.p91MediaFromCandidates(candidates, pageURL), nil
+		referer := strings.TrimSpace(task.Chapter.PageURL)
+		if p91OriginOf(referer) == "" {
+			referer = p91SiteURL + "/view_video.php?viewkey=" + url.QueryEscape(sourceID)
+		}
+		return d.p91MediaFromCandidates(candidates, referer), nil
 	}
+	pageURL := d.p91BaseURL(ctx) + "/view_video.php?viewkey=" + url.QueryEscape(sourceID)
 
 	var lastErr error
 	blocked := 0
@@ -1072,7 +1183,7 @@ func (d *Downloader) resolveP91Media(ctx context.Context, task Task) (providerMe
 
 	// ev.php?VID=<viewkey> 是站方「按视频取播放器」的入口：返回内容只对应这一部片，
 	// 不受详情页随机渲染和相关推荐干扰，作为第二来源。
-	evAddress := p91SiteURL + "/ev.php?VID=" + url.QueryEscape(sourceID)
+	evAddress := d.p91BaseURL(ctx) + "/ev.php?VID=" + url.QueryEscape(sourceID)
 	if evText, evErr := d.p91Get(ctx, evAddress); evErr == nil {
 		fresh, evBlocked := p91MediaCandidates(evText, evAddress)
 		blocked += evBlocked
@@ -1180,7 +1291,7 @@ func p91ViewkeyOf(pageURL string) string {
 // p91Reload 在播放中途直链失效时重新解析一条：换游客标记重新渲染详情页，
 // 再按可用性探测一遍。签名过期的老地址救不回来，只能靠这条新地址接着播。
 func (d *Downloader) p91Reload(ctx context.Context, viewkey string) (string, error) {
-	pageURL := p91SiteURL + "/view_video.php?viewkey=" + url.QueryEscape(viewkey)
+	pageURL := d.p91BaseURL(ctx) + "/view_video.php?viewkey=" + url.QueryEscape(viewkey)
 	if pageText, err := d.p91Get(ctx, pageURL); err == nil {
 		if candidates, _ := p91MediaCandidates(pageText, pageURL); len(candidates) > 0 {
 			return candidates[0], nil
@@ -1356,7 +1467,7 @@ func (d *Downloader) fetchP91AuthorPage(ctx context.Context, uid string, page in
 	if page < 1 {
 		page = 1
 	}
-	base := p91SiteURL + "/uvideos.php?UID=" + url.QueryEscape(uid) + "&page=" + fmt.Sprint(page)
+	base := d.p91BaseURL(ctx) + "/uvideos.php?UID=" + url.QueryEscape(uid) + "&page=" + fmt.Sprint(page)
 	// 作者页有三套渲染（公开列表 / basic 视图 / 不带 type 参数）。站方按游客
 	// 身份随机给其中一套，单一路径经常只拿到作者资料、没有视频列表 —— 这就是
 	// 「每个作者点进去都是空」的根因。逐个试，谁先解析出作品就用谁。
