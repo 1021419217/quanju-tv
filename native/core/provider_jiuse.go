@@ -345,8 +345,9 @@ func (d *Downloader) fetchJiuseCatalogPage(ctx context.Context, page int, catego
 	if err != nil {
 		return nil, false, err
 	}
-	// 只清洗默认入口（「全部」），具体分类保持原样。
-	if strings.TrimSpace(category) != "" {
+	// 只清洗默认入口（「全部」）。具体分类与搜索结果保持原样：
+	// 用户实测「分类里的带标片能播、搜索出来的都能播」，只有首页那批 1002。
+	if strings.TrimSpace(category) != "" || strings.TrimSpace(query) != "" {
 		return items, hasMore, nil
 	}
 	kept := jiuseFreeOnly(items)
