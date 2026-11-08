@@ -11,32 +11,39 @@ permissions:
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 12
     steps:
       - name: Probe 91porny
         run: |
           UA="Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
           B="https://91porny.com"
-          echo "===== HOME"
-          curl -sSL -m 30 -A "$UA" "$B/video/index" -o home.html -w "http=%{http_code} bytes=%{size_download}\n"
-          echo "--- nav links"
-          grep -oE 'href="[^"]{1,120}"[^>]*>[^<]{1,24}<' home.html | sed 's/ class="[^"]*"//g' | head -60
-          echo "--- video paths"
-          grep -oE 'href="/video/[^"]*"' home.html | sort -u | head -30
-          echo "--- cate-ish"
-          grep -oiE 'href="[^"]*(cate|category|sort|tag)[^"]*"' home.html | sort -u | head -30
-          echo "===== DETAIL"
-          curl -sSL -m 30 -A "$UA" -e "$B/" "$B/video/view/e7f9b65d89f5238b6211" -o d.html -w "http=%{http_code} bytes=%{size_download}\n"
-          grep -oE 'data-src="[^"]*"' d.html | head -5
-          echo "--- title"
-          grep -oE '<h4 class="container-title[^"]*"[^>]*>[^<]*' d.html | head -2
-          SRC=$(grep -oE 'data-src="[^"]*"' d.html | head -1 | cut -d'"' -f2)
-          echo "SRC=$SRC"
-          echo "===== M3U8 curl"
-          curl -sSL -m 30 -A "$UA" -e "$B/video/view/e7f9b65d89f5238b6211" -D m.hdr "$SRC" -o p.m3u8 -w "http=%{http_code} bytes=%{size_download}\n"
-          head -12 m.hdr
-          echo "--- body"
-          head -20 p.m3u8
-          echo "===== M3U8 no-referer"
-          curl -sSL -m 30 -A "$UA" "$SRC" -o p2.m3u8 -w "http=%{http_code} bytes=%{size_download}\n"
-          head -12 p2.m3u8
+          probe() {
+            SRC="$1"; REF="$2"
+            code=$(curl -sSL -m 20 -A "$UA" -e "$REF" -D /tmp/h.txt "$SRC" -o /tmp/b.txt -w "%{http_code}")
+            notice=$(grep -i "x-video-notice" /tmp/h.txt | tr -d '\r' | tr '\n' ' ')
+            echo "  http=$code bytes=$(stat -c%s /tmp/b.txt) $notice"
+            head -8 /tmp/b.txt | tr '\n' ' '; echo
+          }
+          echo "===== 3 videos x default line"
+          for KEY in e7f9b65d89f5238b6211 7dff460579f327b234a2 14c4b87422acad70e067; do
+            echo "-- $KEY"
+            curl -sSL -m 20 -A "$UA" -e "$B/" "$B/video/view/$KEY" -o /tmp/d.html
+            SRC=$(grep -oE 'data-src="[^"]*"' /tmp/d.html | head -1 | cut -d'"' -f2)
+            echo "  src=$SRC"
+            probe "$SRC" "$B/video/view/$KEY"
+          done
+          echo "===== line1..3 on first video"
+          for L in line1 line2 line3; do
+            echo "-- $L"
+            curl -sSL -m 20 -A "$UA" -e "$B/" "$B/video/view/e7f9b65d89f5238b6211?server=$L" -o /tmp/l.html
+            SRC=$(grep -oE 'data-src="[^"]*"' /tmp/l.html | head -1 | cut -d'"' -f2)
+            echo "  src=$SRC"
+            probe "$SRC" "$B/video/view/e7f9b65d89f5238b6211"
+          done
+          echo "===== category page sample"
+          curl -sSL -m 20 -A "$UA" "$B/video/category/hot-list" -o /tmp/c.html -w "http=%{http_code} bytes=%{size_download}\n"
+          grep -oE 'href="/video/view/[0-9a-f]+"' /tmp/c.html | head -5
+          echo "===== p91 main site"
+          curl -sSL -m 25 -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" -H "Cookie: language=cn_CN; ga=1" "$B/../" -o /dev/null -w "unused=%{http_code}\n" || true
+          curl -sSL -m 25 -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" -H "Cookie: language=cn_CN; ga=1" "https://91porn.com/index.php" -o /tmp/p.html -w "p91 home http=%{http_code} bytes=%{size_download}\n"
+          grep -oE 'viewkey=[0-9a-f]+' /tmp/p.html | head -3
