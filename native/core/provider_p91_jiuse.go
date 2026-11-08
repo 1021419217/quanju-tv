@@ -126,7 +126,8 @@ func (d *Downloader) p91JiuseMedia(ctx context.Context, viewkey string) (provide
 	if !validJiuseID(viewkey) {
 		return providerMedia{}, errors.New("viewkey 无效")
 	}
-	pageURL := jiuseBaseURL + "/video/view/" + viewkey
+	d.ensureJiuseBase(ctx)
+	pageURL := jiuseBase() + "/video/view/" + viewkey
 	budget, cancel := context.WithTimeout(ctx, p91JiuseBudget)
 	defer cancel()
 

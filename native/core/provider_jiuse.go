@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -39,6 +40,63 @@ const (
 	// jiusePlayMinSegments：一条正常 HLS 至少这么多分片（占位列表只有 1 段）。
 	jiusePlayMinSegments = 3
 )
+
+// 九色有多个同源镜像：同一个 viewkey、同一个 CDN、同一份数据，只是域名不同。
+// 实测 2026-11：91porny.com / 91porny.org / 91porn.mom / 91porn.is 全部命中，
+// 91porny.net / .xyz / .vip / .cc / .top / .me 是空壳或跳转。
+//
+// 主域在国内时不时被墙，而 91 现在正是借九色取流（见 provider_p91_jiuse.go），
+// 主域一挂就等于 91 一起废。所以这里做一层「首个能出页面的域名」探测，缓存
+// 30 分钟；探测失败就退回主域，不改变原有行为。
+var jiuseBaseMirrors = []string{
+	"https://91porny.org",
+	"https://91porn.mom",
+	"https://91porn.is",
+}
+
+var jiuseBaseState struct {
+	mu        sync.Mutex
+	active    string
+	checkedAt time.Time
+}
+
+// jiuseBase 返回当前可用的域名，未探测过就是主域。
+func jiuseBase() string {
+	jiuseBaseState.mu.Lock()
+	defer jiuseBaseState.mu.Unlock()
+	if jiuseBaseState.active != "" && time.Since(jiuseBaseState.checkedAt) < 30*time.Minute {
+		return jiuseBaseState.active
+	}
+	return jiuseBaseURL
+}
+
+// ensureJiuseBase 在首次使用（或缓存过期）时探一次域名。
+// 判断依据不是状态码——被墙的域名也会超时——而是页面里有没有卡片容器。
+func (d *Downloader) ensureJiuseBase(ctx context.Context) string {
+	jiuseBaseState.mu.Lock()
+	fresh := jiuseBaseState.active != "" && time.Since(jiuseBaseState.checkedAt) < 30*time.Minute
+	jiuseBaseState.mu.Unlock()
+	if fresh {
+		return jiuseBase()
+	}
+	for _, base := range append([]string{jiuseBaseURL}, jiuseBaseMirrors...) {
+		probeCtx, cancel := context.WithTimeout(ctx, 6*time.Second)
+		pageText, err := d.fetchProviderText(probeCtx, base+"/video/category/"+jiuseDefaultCategory, base+"/")
+		cancel()
+		if err != nil {
+			continue
+		}
+		if !strings.Contains(pageText, "colVideoList") {
+			continue
+		}
+		jiuseBaseState.mu.Lock()
+		jiuseBaseState.active = base
+		jiuseBaseState.checkedAt = time.Now()
+		jiuseBaseState.mu.Unlock()
+		return base
+	}
+	return jiuseBase()
+}
 
 // 分类：只保留 2026-11 实测**能播**的入口。
 //
@@ -228,7 +286,7 @@ func parseJiuseCards(pageText, category string) []Drama {
 func jiuseCatalogAddress(page int, category, query string) string {
 	keyword := strings.TrimSpace(query)
 	if keyword != "" {
-		address := jiuseBaseURL + "/search?keywords=" + url.QueryEscape(keyword)
+		address := jiuseBase() + "/search?keywords=" + url.QueryEscape(keyword)
 		if page > 1 {
 			address += "&page=" + strconv.Itoa(page)
 		}
@@ -245,15 +303,16 @@ func jiuseCatalogAddress(page int, category, query string) string {
 	if page > 1 {
 		path += "?page=" + strconv.Itoa(page)
 	}
-	return jiuseBaseURL + path
+	return jiuseBase() + path
 }
 
 func (d *Downloader) fetchJiuseCatalogPage(ctx context.Context, page int, category, query string) ([]Drama, bool, error) {
 	if page < 1 || page > 100000 || !validJiuseCategory(category) || len(query) > 128 {
 		return nil, false, errors.New("九色目录查询参数无效")
 	}
+	d.ensureJiuseBase(ctx)
 	address := jiuseCatalogAddress(page, category, query)
-	pageText, err := d.fetchProviderText(ctx, address, jiuseBaseURL+"/")
+	pageText, err := d.fetchProviderText(ctx, address, jiuseBase()+"/")
 	if err != nil {
 		return nil, false, err
 	}
@@ -302,8 +361,9 @@ func (d *Downloader) fetchJiuseDetail(ctx context.Context, sourceID string) (Dra
 	if !validJiuseID(sourceID) {
 		return Drama{}, nil, errors.New("九色视频 ID 无效")
 	}
-	pageURL := jiuseBaseURL + "/video/view/" + sourceID
-	pageText, err := d.fetchProviderText(ctx, pageURL, jiuseBaseURL+"/")
+	d.ensureJiuseBase(ctx)
+	pageURL := jiuseBase() + "/video/view/" + sourceID
+	pageText, err := d.fetchProviderText(ctx, pageURL, jiuseBase()+"/")
 	if err != nil {
 		return Drama{}, nil, err
 	}
@@ -443,7 +503,8 @@ func (d *Downloader) resolveJiuseMedia(ctx context.Context, task Task) (provider
 	if !valid || source != sourceJiuse || !validJiuseID(sourceID) || !strings.HasPrefix(task.Chapter.ID, prefix) {
 		return providerMedia{}, errors.New("九色播放信息无效，请刷新详情")
 	}
-	pageURL := jiuseBaseURL + "/video/view/" + sourceID
+	d.ensureJiuseBase(ctx)
+	pageURL := jiuseBase() + "/video/view/" + sourceID
 
 	// 换线只在「这一条线路本身出问题」时才有意义（超时 / 详情页没给地址）。
 	// 1002 是片源级的：同一个视频四条线路回的都是同一份占位，换线纯属让用户
