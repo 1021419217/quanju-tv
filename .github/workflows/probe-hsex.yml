@@ -1,0 +1,49 @@
+name: Probe hsex
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Fetch hsex pages
+        run: |
+          set -x
+          UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+          getent hosts hsex.icu || true
+          curl -sS -m 40 -A "$UA" -L "https://hsex.icu/" -o home.html -w "home http=%{http_code} bytes=%{size_download} url=%{url_effective}\n" || echo "home failed"
+          ls -l home.html 2>/dev/null || true
+          echo "=== title"
+          grep -oE '<title[^>]*>[^<]*' home.html | head -3
+          echo "=== head sample"
+          head -c 2000 home.html
+          echo
+          echo "=== links"
+          grep -oE 'href="[^"]{3,80}"' home.html | sort | uniq -c | sort -rn | head -40
+          echo "=== possible detail/card class"
+          grep -oE 'class="[^"]{2,60}"' home.html | sort | uniq -c | sort -rn | head -40
+      - name: Probe detail page
+        run: |
+          UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+          LINK=$(grep -oE 'href="/[a-z0-9/-]+"' home.html | sed 's/href="//;s/"$//' | grep -vE '^/(category|tag|page|logout|login|register|search|dmca|contact|terms|privacy)' | head -20 | sort -u | head -10)
+          echo "candidates: $LINK"
+          for p in $LINK; do
+            code=$(curl -sS -m 30 -A "$UA" "https://hsex.icu$p" -o "d.html" -w "%{http_code}")
+            n=$(grep -c 'video' d.html)
+            echo "$p -> $code size=$(wc -c < d.html) videohits=$n"
+          done
+      - name: Dump artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hsex-html
+          path: |
+            home.html
+            d.html
+          if-no-files-found: ignore
+          retention-days: 2
