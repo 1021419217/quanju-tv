@@ -270,6 +270,11 @@ abstract class AppRepository {
   Future<Map<String, dynamic>> importCustomSources(String content) async =>
       throw AppFailure('当前环境不支持自定义源');
   Future<int> resetCustomSources() async => throw AppFailure('当前环境不支持自定义源');
+
+  /// 输入站点网址，抓取网页 HTML 自动反推 XBPQ 规则。只返回规则与诊断说明，
+  /// 不会写入自定义源；是否保存由用户在表单里点「保存」决定。
+  Future<Map<String, dynamic>> analyzeCustomSourceSite(String base) async =>
+      throw AppFailure('当前环境不支持自定义源');
 }
 
 class NativeRepository extends AppRepository {
@@ -626,6 +631,8 @@ class NativeRepository extends AppRepository {
             Duration(
               seconds: action == 'moveDownloads'
                   ? 620
+                  : action == 'analyzeCustomSourceSite'
+                  ? 100
                   : action == 'danmaku'
                   ? 15
                   : action == 'preload'
@@ -1150,5 +1157,14 @@ class NativeRepository extends AppRepository {
   Future<int> resetCustomSources() async {
     final result = await _call({'action': 'resetCustomSources'});
     return (result as Map)['removed'] as int? ?? 0;
+  }
+
+  @override
+  Future<Map<String, dynamic>> analyzeCustomSourceSite(String base) async {
+    final result = await _call({
+      'action': 'analyzeCustomSourceSite',
+      'base': base,
+    });
+    return Map<String, dynamic>.from(result as Map);
   }
 }
