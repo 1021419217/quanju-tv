@@ -19,10 +19,10 @@ jobs:
           curl -sSL -m 30 -A "$UA91" -H "Cookie: language=cn_CN; ga=1" "$REF" -o /tmp/d.html
           echo "===== detail author links"
           grep -oE 'href="[^"]*u(profile|videos)\.php\?UID=[^"]*"[^>]*>[^<]{0,40}' /tmp/d.html | head -5
-          UID=$(grep -oE 'u(profile|videos)\.php\?UID=([0-9A-Za-z_-]+)' /tmp/d.html | head -1 | sed 's/.*UID=//')
-          echo "UID=$UID"
+          AUID=$(grep -oE 'u(profile|videos)\.php\?UID=([0-9A-Za-z_-]+)' /tmp/d.html | head -1 | sed 's/.*UID=//')
+          echo "AUID=$AUID"
           echo "===== uvideos page"
-          curl -sSL -m 30 -A "$UA91" -H "Cookie: language=cn_CN; ga=1" -e "$REF" "https://91porn.com/uvideos.php?UID=$UID&page=1" -o /tmp/u.html -w "http=%{http_code} bytes=%{size_download}\n"
+          curl -sSL -m 30 -A "$UA91" -H "Cookie: language=cn_CN; ga=1" -e "$REF" "https://91porn.com/uvideos.php?UID=$AUID&page=1" -o /tmp/u.html -w "http=%{http_code} bytes=%{size_download}\n"
           echo "--- viewkey links"
           grep -oE 'view_video\.php\?[^"]{0,80}' /tmp/u.html | head -8
           echo "--- own= links"
@@ -30,7 +30,7 @@ jobs:
           echo "--- card sample"
           grep -oE '.{0,80}viewkey.{0,80}' /tmp/u.html | head -6
           echo "===== uprofile page"
-          curl -sSL -m 30 -A "$UA91" -H "Cookie: language=cn_CN; ga=1" -e "$REF" "https://91porn.com/uprofile.php?UID=$UID" -o /tmp/p.html -w "http=%{http_code} bytes=%{size_download}\n"
+          curl -sSL -m 30 -A "$UA91" -H "Cookie: language=cn_CN; ga=1" -e "$REF" "https://91porn.com/uprofile.php?UID=$AUID" -o /tmp/p.html -w "http=%{http_code} bytes=%{size_download}\n"
           grep -oE 'view_video\.php\?[^"]{0,80}' /tmp/p.html | head -5
           echo "===== jiuse category"
           UA="Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
