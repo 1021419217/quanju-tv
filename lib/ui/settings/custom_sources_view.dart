@@ -533,6 +533,9 @@ class _CustomSourceEditorState extends State<_CustomSourceEditor> {
           .whereType<String>()
           .where((line) => line.isNotEmpty)
           .toList();
+      final catalogs = (result['catalogs'] as num?)?.toInt() ?? 0;
+      final episodes = (result['episodes'] as num?)?.toInt() ?? 0;
+      final kind = (result['kind'] as String? ?? '').trim();
       if (!mounted) return;
       setState(() {
         _analysisNotes = notes;
@@ -542,11 +545,17 @@ class _CustomSourceEditorState extends State<_CustomSourceEditor> {
           if (_name.text.trim().isEmpty) {
             _name.text = (result['name'] as String? ?? '').trim();
           }
-          _analysisSummary =
-              '已按网页 HTML 生成规则：可直接保存，也可在下方微调后保存。规则优先于源类型，无需改动源类型。';
+          // 识别成功即代表规则已在引擎里实测跑通，明确标成网页源，
+          // 免得保存后还去探测标准 JSON 接口白白拖慢首次加载。
+          if (kind.isNotEmpty) _kind = kind;
+          _analysisSummary = catalogs > 0
+              ? '引擎实测：目录取到 $catalogs 部'
+                  '${episodes > 0 ? '、详情页取到 $episodes 集' : '（详情页未实测到分集）'}'
+                  '。规则已回填，可直接保存，也可在下方微调后保存；想换站识别，直接改上面的网址再点一次。'
+              : '已生成规则，但引擎实测未能完成（分类页抓取失败或超时）：规则未经实测验证，保存后请自行确认能否取到内容。想换站识别，直接改上面的网址再点一次。';
         } else {
           _analysisSummary =
-              '未能识别出可靠规则，已保留为普通网页源（引擎会自动适配 MacCMS 站点），也可以手动粘贴规则。';
+              '未能识别出可用规则：引擎实测取不到内容或站点是动态渲染，已保留为普通网页源（引擎会自动适配 MacCMS 站点），也可以手动粘贴规则。具体原因见下方诊断。';
         }
       });
     } catch (error) {
@@ -584,7 +593,9 @@ class _CustomSourceEditorState extends State<_CustomSourceEditor> {
             const SizedBox(height: 12),
             TextField(
               controller: _base,
-              enabled: !_busy && !_ruleMode,
+              // 识别成功后会自动切到规则模式，但网址框不能跟着变灰：
+              // 用户要换一个站识别时，直接改这里再点一次即可，不必先去关规则开关。
+              enabled: !_busy,
               keyboardType: TextInputType.url,
               textInputAction: TextInputAction.next,
               autocorrect: false,
@@ -592,8 +603,8 @@ class _CustomSourceEditorState extends State<_CustomSourceEditor> {
                 labelText: '源网址',
                 hintText: 'https://example.com',
                 helperText: _ruleMode
-                    ? '规则模式下网址由规则「主页url」决定；要识别别的站点请先关闭规则开关。'
-                    : '填好网址后点「自动识别规则」，会抓取网页 HTML 反推分类、列表、搜索与播放字段。',
+                    ? '规则模式下取流以规则「主页url」为准；改这里的网址再点识别，可直接换站重新生成规则。'
+                    : '填好网址后点「自动识别规则」，会抓取网页 HTML 并用引擎实测能否取到内容。',
                 helperMaxLines: 3,
               ),
             ),
@@ -613,6 +624,9 @@ class _CustomSourceEditorState extends State<_CustomSourceEditor> {
             ),
             const SizedBox(height: 8),
             DropdownButtonFormField<String>(
+              // 自动识别会把源类型回填成 web；initialValue 只在 initState 读一次，
+              // 加 key 让回填后下拉框重建显示新值，避免显示与实际保存值不一致。
+              key: ValueKey(_kind),
               initialValue: _kind,
               decoration: const InputDecoration(
                 labelText: '源类型',
@@ -683,7 +697,7 @@ class _CustomSourceEditorState extends State<_CustomSourceEditor> {
                       ),
                       if (_analysisNotes.isNotEmpty) ...[
                         const SizedBox(height: 6),
-                        for (final note in _analysisNotes.take(8))
+                        for (final note in _analysisNotes.take(10))
                           Padding(
                             padding: const EdgeInsets.only(top: 2),
                             child: Text(

@@ -45,12 +45,14 @@ const (
 // mode=规则 时 rule 是完整规则 JSON；mode=网址 时 rule 为空，表示这次没能可靠
 // 识别出站点结构，保留用户填的网址走现有的 MacCMS 自动适配（不产生坏规则）。
 type siteAnalysis struct {
-	Rule  string   `json:"rule"`
-	Name  string   `json:"name"`
-	Base  string   `json:"base"`
-	Kind  string   `json:"kind"`
-	Mode  string   `json:"mode"`
-	Notes []string `json:"notes"`
+	Rule     string   `json:"rule"`
+	Name     string   `json:"name"`
+	Base     string   `json:"base"`
+	Kind     string   `json:"kind"`
+	Mode     string   `json:"mode"`
+	Catalogs int      `json:"catalogs"` // 引擎实测：目录取到的剧目数
+	Episodes int      `json:"episodes"` // 引擎实测：详情页取到的分集数
+	Notes    []string `json:"notes"`
 }
 
 type siteCategory struct {
@@ -428,15 +430,70 @@ func (d *Downloader) analyzeCustomSourceSite(ctx context.Context, raw string) (s
 		a.note("命中站点专属实测规则，已直接套用")
 	}
 	ruleText := siteRuleJSON(fields)
-	if _, ok := parseXBPQRule(ruleText); !ok {
+	parsedRule, ok := parseXBPQRule(ruleText)
+	if !ok {
 		a.note("生成的规则未通过引擎解析校验，保留为普通网页源")
+		return finish()
+	}
+	// 语法校验只保证规则能被引擎读进去，不保证字段能在站点真实页面上截出条目。
+	// parseXBPQRule 会按 分类url 形态套模板家族，模板补出来的字段在真实分类页上
+	// 往往截不出东西——只凭「规则 JSON 生成了」就回填表单，用户保存后会看到
+	// 分类空白 / 点开没内容。这里用引擎自己的目录 / 详情路径实测一次，取不到
+	// 剧目就宁可回落普通网页源（引擎仍会自动适配 MacCMS），不再给出假成功。
+	catalogs, episodes, verdict := a.verifySiteRule(parsedRule)
+	if verdict == "empty" {
+		// 页面确实抓到了，却一条剧目都截不出来：这是确定的坏规则，不再交给用户。
+		a.note("引擎实测：按生成的规则抓分类页取不到剧目，保留为普通网页源（引擎会自动适配 MacCMS 站点），也可手动粘贴规则")
 		return finish()
 	}
 	result.Rule = ruleText
 	result.Mode = "规则"
 	result.Kind = "web"
-	a.note("规则已通过引擎解析校验，保存后会自动套用对应模板家族补齐未识别字段")
+	result.Catalogs = catalogs
+	result.Episodes = episodes
+	switch verdict {
+	case "fetch":
+		// 抓取失败（超时 / 盾页 / 网络）不能当成「规则坏」：只是这次没验成，
+		// 保留规则但明确标注未验证，避免把慢站误判成不可用。
+		a.note("引擎实测未能完成：分类页抓取失败或超时，规则未经实测验证，保存后请自行确认能否取到内容")
+	default:
+		if episodes > 0 {
+			a.note("引擎实测：目录取到 %d 部、详情页取到 %d 集，规则可用", catalogs, episodes)
+		} else {
+			a.note("引擎实测：目录取到 %d 部；详情页未实测到分集，保存后若点开没内容请手动微调播放字段", catalogs)
+		}
+	}
 	return finish()
+}
+
+// verifySiteRule 按引擎真实消费路径实测规则：用 xbpqCategoryURL 渲染出引擎实际会
+// 请求的分类页（与分析器自己 siteFillCategoryURL 拼的地址可能不同），再跑
+// xbpqCatalog / xbpqDetail。
+// verdict：ok=实测通过；empty=页面抓到了但截不出剧目（假阳性）；fetch=抓取失败无法判定。
+func (a *siteAnalyzer) verifySiteRule(rule xbpqRule) (int, int, string) {
+	categoryID := "1"
+	if len(a.cats) > 0 && a.cats[0].ID != "" {
+		categoryID = a.cats[0].ID
+	}
+	a.note("引擎实测分类页地址：%s", xbpqCategoryURL(rule, a.site, categoryID, 1))
+	ctx, cancel := context.WithTimeout(a.ctx, siteAnalyzerRequestTimeout)
+	defer cancel()
+	dramas, _, err := a.d.xbpqCatalog(ctx, "custom:probe", a.site, 1, categoryID, rule)
+	if err != nil {
+		message := err.Error()
+		if strings.Contains(message, "抓取失败") || strings.Contains(message, "空页面") {
+			return 0, 0, "fetch"
+		}
+		return 0, 0, "empty"
+	}
+	if len(dramas) == 0 {
+		return 0, 0, "empty"
+	}
+	_, chapters, detailErr := a.d.xbpqDetail(ctx, "custom:probe", a.site, dramas[0].SourceID, rule)
+	if detailErr != nil {
+		return len(dramas), 0, "ok"
+	}
+	return len(dramas), len(chapters), "ok"
 }
 
 func (a *siteAnalyzer) assembleRule() map[string]string {
