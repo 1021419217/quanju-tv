@@ -160,10 +160,10 @@ func jrMkURL(origin, guid, rawURL, token string, expires int64, tokenPath string
 }
 
 type av321StreamHook struct {
-	mu       sync.Mutex
-	slug     string
-	referer  string
-	tried    map[string]bool
+	mu      sync.Mutex
+	slug    string
+	referer string
+	tried   map[string]bool
 }
 
 func (h *av321StreamHook) SignSegment(rawURL string) (string, error) {
@@ -198,11 +198,11 @@ func (h *av321StreamHook) ShortRefetch() bool {
 }
 
 type mmtvStreamHook struct {
-	mu       sync.Mutex
-	embed    string
-	referer  string
-	backups  []string
-	tried    map[string]bool
+	mu      sync.Mutex
+	embed   string
+	referer string
+	backups []string
+	tried   map[string]bool
 }
 
 func (h *mmtvStreamHook) SignSegment(rawURL string) (string, error) {

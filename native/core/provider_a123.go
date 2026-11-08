@@ -43,21 +43,21 @@ var a123Categories = []nativeCategory{
 	{ID: "11", Name: "连续剧"},
 	{ID: "12", Name: "综艺"},
 	{ID: "13", Name: "动漫"},
-        {ID: "15", Name: "福利"},
+	{ID: "15", Name: "福利"},
 }
 
 var (
-	a123CardPattern = regexp.MustCompile(`(?is)<a[^>]*class="w4-item"[^>]*href="/v/([^"/]+)\.html"[^>]*>(.*?)</a>`)
-	a123AttrHREF    = regexp.MustCompile(`(?i)href="([^"]+)"`)
-	a123AttrSrc     = regexp.MustCompile(`(?i)(?:data-src|src)="([^"]+)"`)
-	a123AttrTitle   = regexp.MustCompile(`(?i)title="([^"]*)"`)
-	a123AttrAlt     = regexp.MustCompile(`(?i)alt="([^"]*)"`)
-	a123InfoTitle   = regexp.MustCompile(`(?is)<div class="t" title="([^"]*)"[^>]*>([^<]*)</div>`)
-	a123InfoMeta    = regexp.MustCompile(`(?is)<div class="i"[^>]*>(.*?)</div>`)
+	a123CardPattern  = regexp.MustCompile(`(?is)<a[^>]*class="w4-item"[^>]*href="/v/([^"/]+)\.html"[^>]*>(.*?)</a>`)
+	a123AttrHREF     = regexp.MustCompile(`(?i)href="([^"]+)"`)
+	a123AttrSrc      = regexp.MustCompile(`(?i)(?:data-src|src)="([^"]+)"`)
+	a123AttrTitle    = regexp.MustCompile(`(?i)title="([^"]*)"`)
+	a123AttrAlt      = regexp.MustCompile(`(?i)alt="([^"]*)"`)
+	a123InfoTitle    = regexp.MustCompile(`(?is)<div class="t" title="([^"]*)"[^>]*>([^<]*)</div>`)
+	a123InfoMeta     = regexp.MustCompile(`(?is)<div class="i"[^>]*>(.*?)</div>`)
 	a123PlayerSrc    = regexp.MustCompile(`(?is)<div[^>]*class="w4-player"[^>]*data-src="([^"]+)"`)
 	a123PlayerPoster = regexp.MustCompile(`(?is)<div[^>]*class="w4-player"[^>]*data-poster="([^"]+)"`)
 	a123PlayerTitle  = regexp.MustCompile(`(?is)<div[^>]*class="w4-player"[^>]*data-title="([^"]*)"`)
-	a123DetailTitle = regexp.MustCompile(`(?is)<h1[^>]*>([^<]+)</h1>`)
+	a123DetailTitle  = regexp.MustCompile(`(?is)<h1[^>]*>([^<]+)</h1>`)
 	// 选集列表：<div class="w4-episode-list …">…<a href="/v/slug/xxx.html" title="…">…</a>…
 	a123EpisodeBlock = regexp.MustCompile(`(?is)<div[^>]*class="w4-episode-list[^"]*"[^>]*>(.*?)(?:<h2|</div>\s*</div>\s*</div>|$)`)
 	a123EpisodeLink  = regexp.MustCompile(`(?is)<a[^>]*href="(/v/[^"/]+/[^"]+\.html)"[^>]*>`)

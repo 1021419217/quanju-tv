@@ -560,4 +560,3 @@ func (d *Downloader) fetchXChinaLiveDetail(ctx context.Context, sourceID string)
 	}}
 	return drama, chapters, nil
 }
-

@@ -143,15 +143,15 @@ func magnetMaps(entries []magnetEntry) []interface{} {
 			row = append(row, t)
 		}
 		out = append(out, map[string]interface{}{
-			"name":    e.Name,
-			"url":     e.URL,
-			"size":    e.SizeMB * 1024 * 1024,
-			"sizeMB":  e.SizeMB,
+			"name":      e.Name,
+			"url":       e.URL,
+			"size":      e.SizeMB * 1024 * 1024,
+			"sizeMB":    e.SizeMB,
 			"sizeLabel": e.SizeLabel(),
-			"files":   e.Files,
-			"date":    e.Date,
-			"quality": e.Quality,
-			"tags":    row,
+			"files":     e.Files,
+			"date":      e.Date,
+			"quality":   e.Quality,
+			"tags":      row,
 		})
 	}
 	return out

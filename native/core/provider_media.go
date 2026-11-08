@@ -71,6 +71,8 @@ func (d *Downloader) providerBaseURL(source string) string {
 		fallback = p91SiteURL
 	case sourceTheporny:
 		configured, fallback = d.cfg.ThepornyURL, thepornyHosts[0]
+	case sourceBeabox:
+		configured, fallback = d.cfg.BeaboxURL, beaboxBaseURL
 	case sourceJinguoDuanju:
 		configured, fallback = d.cfg.JinguoDuanjuURL, jinguoDuanjuBaseURL
 	case sourceJinguo:
@@ -209,6 +211,9 @@ func (d *Downloader) resolveProviderMedia(ctx context.Context, task Task) (provi
 	}
 	if chapter.Source == sourceTheporny {
 		return d.resolveThepornyMedia(ctx, task)
+	}
+	if chapter.Source == sourceBeabox {
+		return d.resolveBeaboxMedia(ctx, task)
 	}
 	if chapter.Source == sourceJinguoDuanju {
 		return d.resolveJinguoDuanjuMedia(ctx, task)

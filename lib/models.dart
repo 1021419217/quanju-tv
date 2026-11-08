@@ -31,6 +31,7 @@ class SourceSite {
       id == 'xchina' ||
       id == 'xchina-live' ||
       id == 'p91' ||
+      id == 'beabox' ||
       id == 'theporny' ||
       id == 'jinguoduanju' ||
       id == 'jinguo' ||
@@ -83,6 +84,10 @@ class SourceSite {
   /// 91porn：站方页面直抓，默认「最近更新」按发布时间倒序，
   /// 与网页版同一份内容，支持站方 9 个分类与关键词搜索。
   static const p91 = SourceSite('p91', '91porn', '最近更新 · 分类 · 在线搜索');
+
+  /// 笔盒（BeaBox）：官网 JSON 接口，响应体 AES 加密，域名会自动换，
+  /// 由接口里的域名池自我修复，支持分类与关键词搜索。
+  static const beabox = SourceSite('beabox', '笔盒', '最新 · 分类 · 在线搜索');
 
   /// 短剧家族内置源（全剧视界可用），与 Go 侧 duanjuProviderCatalog 对齐。
   static const duanjuValues = [
@@ -228,6 +233,7 @@ class SourceSite {
     // XChina 实时上新：固定按上传时间倒序，刷新整体替换第一页，用来验证上新。
     xchinaLive,
     p91,
+    beabox,
   ];
   static const knownValues = [...primaryValues, ...restrictedValues];
   static const allValues = [...primaryValues, ...restrictedValues];
@@ -344,6 +350,8 @@ class Drama {
     this.onlineDate = '',
     this.tags = const [],
     this.releaseStatus = '',
+    this.author = '',
+    this.authorId = '',
     this.peers = const [],
   }) : vipStatus = vip;
   final String id;
@@ -361,6 +369,11 @@ class Drama {
   final String onlineDate;
   final List<String> tags;
   final String releaseStatus;
+
+  /// 发布者（91porn 的上传者）。authorId 非空时详情页可以把作者名做成可点击，
+  /// 进作者主页看他发布的其它作品。
+  final String author;
+  final String authorId;
 
   /// 跨源聚合搜索里同一部剧在其它站源的副本，供「全部源」结果展示与切换播放源。
   final List<Drama> peers;
@@ -391,6 +404,8 @@ class Drama {
     onlineDate: json['onlineDate'] as String? ?? '',
     tags: (json['tags'] as List? ?? const []).whereType<String>().toList(),
     releaseStatus: json['releaseStatus'] as String? ?? '',
+    author: json['author'] as String? ?? '',
+    authorId: json['authorId'] as String? ?? '',
     peers: [
       for (final row in json['peers'] as List? ?? const [])
         Drama.fromJson(Map<String, dynamic>.from(row as Map)),
@@ -412,6 +427,8 @@ class Drama {
     'onlineDate': onlineDate,
     'tags': tags,
     'releaseStatus': releaseStatus,
+    if (author.isNotEmpty) 'author': author,
+    if (authorId.isNotEmpty) 'authorId': authorId,
   };
 
   Drama merge(Drama fresh) {
@@ -451,6 +468,8 @@ class Drama {
           fresh.releaseStatus.isEmpty || fresh.releaseStatus == 'unknown'
           ? releaseStatus
           : fresh.releaseStatus,
+      author: fresh.author.isEmpty ? author : fresh.author,
+      authorId: fresh.authorId.isEmpty ? authorId : fresh.authorId,
     );
   }
 }

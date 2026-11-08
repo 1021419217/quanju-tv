@@ -703,4 +703,3 @@ func tokenAPIImpl(cfg *tokenAPIConfig) *siteImpl {
 // 成品」通则撤下：hzai 三主机 register 全 404（服务端下线状）、xme
 // register 500，同属服务端坏。令牌 API 引擎留树存档，无站点引用；
 // 两站配方（主机/channelCode/前缀）在 git 历史的本文件旧版可查。
-

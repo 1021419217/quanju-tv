@@ -35,7 +35,7 @@ const (
 	sourceA123          = "a123"
 	sourceIkanbot       = "ikanbot"
 	// sourceFanqie 番茄：目录/搜索/详情/取流转发给本机番茄内容引擎（127.0.0.1:18921）。
-	sourceFanqie       = "fanqie"
+	sourceFanqie = "fanqie"
 	sourceXChina = "xchina"
 	// sourceXChinaLive 是 XChina 的「实时上新」独立源：与 xchina 共用同一套
 	// 请求/解密/播放链路，但目录固定走 /sevenVideos?type=recent（站方时间倒序
@@ -49,6 +49,9 @@ const (
 	// sourceP91 是 91porn：站方 PHP 页面直接抓，播放地址藏在 strencode2() 里
 	// （等价一次百分号解码），见 provider_p91.go。
 	sourceP91 = "p91"
+	// sourceBeabox 是笔盒（BeaBox）：走官网 /api 接口，响应体 AES-CBC 加密，
+	// 站点域名会被墙换，靠 /api 里的 __ENC_DOMAINS 自我发现备选域名。见 provider_beabox.go。
+	sourceBeabox = "beabox"
 
 	providerMaxBodyBytes = 20 * 1024 * 1024
 	providerTimeout      = 12 * time.Second
@@ -129,7 +132,7 @@ func splitProviderDramaID(id string) (source, sourceID string, ok bool) {
 
 func isHuangguoProviderSource(source string) bool {
 	switch canonicalProviderSource(source) {
-	case sourceHuangguoAI, sourceHuangguoVideo, sourceHuangdou, sourceHongguo, sourceHuangju, sourceYeguo, sourceJinguoDuanju, sourceJinguo, sourceHeitao, sourceDSD, sourceCloudFront, sourceSorani, sourceGuipian, sourceHanxiaoquan, sourceIkanbot, sourceA123, sourceFanqie, sourceXChina, sourceXChinaLive, sourceTheporny, sourceP91:
+	case sourceHuangguoAI, sourceHuangguoVideo, sourceHuangdou, sourceHongguo, sourceHuangju, sourceYeguo, sourceJinguoDuanju, sourceJinguo, sourceHeitao, sourceDSD, sourceCloudFront, sourceSorani, sourceGuipian, sourceHanxiaoquan, sourceIkanbot, sourceA123, sourceFanqie, sourceXChina, sourceXChinaLive, sourceTheporny, sourceP91, sourceBeabox:
 		return true
 	}
 	return isDuanjuProviderSource(source) || isSekuSource(source)
@@ -177,6 +180,8 @@ func canonicalProviderSource(source string) string {
 		return sourceP91
 	case "theporny", "theporny.com", "www.theporny.com":
 		return sourceTheporny
+	case "beabox", "beabox.cc", "www.beabox.cc", "beabox.live":
+		return sourceBeabox
 	default:
 		if canonical, found := duanjuSourceAliases[key]; found {
 			return canonical
@@ -320,6 +325,9 @@ func (d *Downloader) GetHuangguoChapters(ctx context.Context, source, sourceID s
 		return drama.DisplayTitle(), chapters, err
 	case sourceTheporny:
 		drama, chapters, err := d.fetchThepornyDetail(ctx, sourceID)
+		return drama.DisplayTitle(), chapters, err
+	case sourceBeabox:
+		drama, chapters, err := d.fetchBeaboxDetail(ctx, sourceID)
 		return drama.DisplayTitle(), chapters, err
 	default:
 		if isDuanjuProviderSource(source) {

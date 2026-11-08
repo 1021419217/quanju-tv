@@ -9,9 +9,9 @@ import (
 )
 
 var av520Profile = &htmlProfile{
-	Base:   "https://www.520avtv.com",
-	UA:     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-	Origin: "https://www.520avtv.com",
+	Base:      "https://www.520avtv.com",
+	UA:        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+	Origin:    "https://www.520avtv.com",
 	ListURL:   "/video/category/{cat}/{page}",
 	DetailURL: "/video/watch/{id}",
 	Cats: []htmlCat{

@@ -355,3 +355,32 @@ func TestMergeP91DetailKeepsListedTitle(t *testing.T) {
 		t.Fatalf("占位标题应被替换: %s", got)
 	}
 }
+
+// 列表卡片与详情页都用 uvideos.php?UID= 链接标作者；匿名上传只有名字没有链接。
+func TestP91AuthorOf(t *testing.T) {
+	card := `<span class="info">From:</span>&nbsp;<a href="/uvideos.php?UID=c24dDoGZBAnwUtBbHweSJB">老张</a>`
+	name, uid := p91AuthorOf(card)
+	if name != "老张" || uid != "c24dDoGZBAnwUtBbHweSJB" {
+		t.Fatalf("作者解析错误: %q %q", name, uid)
+	}
+	anon := `<span class="info">From:</span> 匿名用户`
+	if name, uid := p91AuthorOf(anon); name != "匿名用户" || uid != "" {
+		t.Fatalf("匿名作者解析错误: %q %q", name, uid)
+	}
+	if name, uid := p91AuthorOf(`<html>无作者</html>`); name != "" || uid != "" {
+		t.Fatalf("无作者时应为空: %q %q", name, uid)
+	}
+}
+
+func TestP91ValidAuthorID(t *testing.T) {
+	for _, uid := range []string{"c24dDoGZBAnwUtBbHweSJB8W6ACe8c7sJyQOJ9Af4DQ4sxul", "abc12345"} {
+		if !p91ValidAuthorID(uid) {
+			t.Fatalf("应通过: %s", uid)
+		}
+	}
+	for _, uid := range []string{"", "short", "../etc/passwd", "uid with space", "a&b=cdefgh"} {
+		if p91ValidAuthorID(uid) {
+			t.Fatalf("应拒绝: %q", uid)
+		}
+	}
+}

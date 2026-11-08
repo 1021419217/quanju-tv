@@ -100,6 +100,8 @@ func validNativeCategory(source, category string) bool {
 	case sourceTheporny:
 		_, ok := validThepornyCategory(category)
 		return ok
+	case sourceBeabox:
+		return validBeaboxCategory(category)
 	case sourceJinguoDuanju:
 		return validJinguoDuanjuCategory(category)
 	case sourceJinguo:

@@ -46,10 +46,10 @@ var yhKMKey = []byte("625202f9149maomi")
 var yhKMIV = []byte("5efd3f6060emaomi")
 
 var yhKMDevice = map[string]string{
-	"_device_id":     "ffffffff-da25-75a2-0000-00007ac5aad8",
-	"_app_version":   "1.1.7",
-	"_device_type":   "SM-A205GN",
-	"_sdk_version":   "23",
+	"_device_id":      "ffffffff-da25-75a2-0000-00007ac5aad8",
+	"_app_version":    "1.1.7",
+	"_device_type":    "SM-A205GN",
+	"_sdk_version":    "23",
 	"_device_version": "28",
 }
 

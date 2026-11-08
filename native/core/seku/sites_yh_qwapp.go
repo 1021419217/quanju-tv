@@ -190,10 +190,10 @@ func yhQWCards(slot string, obj map[string]interface{}, isVideo bool) []interfac
 
 func yhQWList(slot, path string, page int, kw, cid string, isVideo bool) ([]interface{}, error) {
 	body := map[string]interface{}{
-		"page":     page,
-		"keyword":  kw,
-		"filter1":  "1",
-		"userId":   "0",
+		"page":    page,
+		"keyword": kw,
+		"filter1": "1",
+		"userId":  "0",
 	}
 	if cid != "" {
 		body["cid"] = cid

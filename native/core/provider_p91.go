@@ -93,6 +93,9 @@ var (
 	p91ThumbRE      = regexp.MustCompile(`<img[^>]+src="([^"]+)"`)
 	p91DurationRE   = regexp.MustCompile(`<span class="duration">\s*([0-9:]+)\s*</span>`)
 	p91FromRE       = regexp.MustCompile(`<span class="info">From:</span>\s*([^<]*)`)
+	// 作者的 UID 藏在 uvideos.php 链接里，详情页与列表卡片都是这个形态。
+	p91UIDRE        = regexp.MustCompile(`uvideos\.php\?UID=([0-9A-Za-z_-]+)`)
+	p91AuthorLinkRE = regexp.MustCompile(`(?is)<a[^>]+uvideos\.php\?UID=[^>]*>([^<]*)</a>`)
 	p91TagRE        = regexp.MustCompile(`<[^>]*>`)
 
 	// 用 div 配对切卡片：站方会在列表里插「混淆卡片」（外层容器带 col-lg-8，
@@ -442,10 +445,7 @@ func parseP91Cards(pageText, category string) []Drama {
 		if m := p91DurationRE.FindStringSubmatch(card); m != nil {
 			duration = p91DurationText(m[1])
 		}
-		uploader := ""
-		if m := p91FromRE.FindStringSubmatch(card); m != nil {
-			uploader = p91CleanText(m[1])
-		}
+		uploader, authorID := p91AuthorOf(card)
 
 		item := Drama{
 			ID:          providerDramaID(sourceP91, viewkey),
@@ -458,6 +458,8 @@ func parseP91Cards(pageText, category string) []Drama {
 			Remark:      duration,
 			TypeName:    categoryName,
 			ChannelName: "91porn",
+			Author:      uploader,
+			AuthorID:    authorID,
 		}
 		items = append(items, item)
 	}
@@ -710,6 +712,7 @@ func (d *Downloader) fetchP91Detail(ctx context.Context, sourceID string) (Drama
 		onlineDate = m[1]
 	}
 
+	author, authorID := p91AuthorOf(pageText)
 	drama := Drama{
 		ID:          providerDramaID(sourceP91, sourceID),
 		Source:      sourceP91,
@@ -719,6 +722,8 @@ func (d *Downloader) fetchP91Detail(ctx context.Context, sourceID string) (Drama
 		ChannelName: "91porn",
 		Cover:       cover,
 		OnlineDate:  onlineDate,
+		Author:      author,
+		AuthorID:    authorID,
 	}
 
 	address, sourceErr := p91SourceFromPage(pageText, pageURL)
@@ -1278,4 +1283,59 @@ func p91ProbeReason(err error) string {
 		}
 	}
 	return "网络不可达"
+}
+
+// p91AuthorOf 从卡片或详情页片段里取作者名与 UID。
+// 名字有时只在 "From:" 文本里、没有链接（匿名上传），这时只有名字没有 UID，
+// 界面就只显示名字、不给点进作者页。
+func p91AuthorOf(fragment string) (string, string) {
+	uid := ""
+	if m := p91UIDRE.FindStringSubmatch(fragment); m != nil {
+		uid = strings.TrimSpace(m[1])
+	}
+	name := ""
+	if m := p91AuthorLinkRE.FindStringSubmatch(fragment); m != nil {
+		name = p91CleanText(m[1])
+	}
+	if name == "" {
+		if m := p91FromRE.FindStringSubmatch(fragment); m != nil {
+			name = p91CleanText(m[1])
+		}
+	}
+	return name, uid
+}
+
+// p91ValidAuthorID 校验作者 UID：站方是 32~64 位的字母数字串。
+func p91ValidAuthorID(uid string) bool {
+	if len(uid) < 8 || len(uid) > 96 {
+		return false
+	}
+	for _, char := range uid {
+		if !((char >= '0' && char <= '9') || (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') || char == '_' || char == '-') {
+			return false
+		}
+	}
+	return true
+}
+
+// fetchP91AuthorPage 取某个作者发布的公开视频，页面卡片结构与列表页一致。
+func (d *Downloader) fetchP91AuthorPage(ctx context.Context, uid string, page int) ([]Drama, bool, error) {
+	uid = strings.TrimSpace(uid)
+	if !p91ValidAuthorID(uid) {
+		return nil, false, errors.New("作者 ID 无效")
+	}
+	if page < 1 {
+		page = 1
+	}
+	address := p91SiteURL + "/uvideos.php?UID=" + url.QueryEscape(uid) + "&type=public&page=" + fmt.Sprint(page)
+	pageText, err := d.p91Get(ctx, address)
+	if err != nil {
+		return nil, false, err
+	}
+	items := parseP91Cards(pageText, "")
+	for index := range items {
+		// 作者页里每条作品都属于同一个作者，补上 UID，点进去还能再回来。
+		items[index].AuthorID = uid
+	}
+	return items, len(items) >= 12, nil
 }

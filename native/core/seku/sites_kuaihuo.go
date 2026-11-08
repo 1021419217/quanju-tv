@@ -277,15 +277,15 @@ func khResolve(slot, rawID string) (map[string]interface{}, error) {
 type khSearchHit struct {
 	ID     string `json:"_id"`
 	Source struct {
-		Name    string `json:"data_name"`
-		Actor   string `json:"data_actor"`
-		PicBig  string `json:"data_picbig"`
-		Intro   string `json:"data_intro"`
+		Name     string `json:"data_name"`
+		Actor    string `json:"data_actor"`
+		PicBig   string `json:"data_picbig"`
+		Intro    string `json:"data_intro"`
 		ClassDir string `json:"class_dir"`
-		Year    int    `json:"year"`
-		Month   int    `json:"month"`
-		Day     int    `json:"day"`
-		IDNum   int    `json:"id"`
+		Year     int    `json:"year"`
+		Month    int    `json:"month"`
+		Day      int    `json:"day"`
+		IDNum    int    `json:"id"`
 	} `json:"_source"`
 }
 

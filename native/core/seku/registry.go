@@ -45,7 +45,7 @@ var slotOrder = []string{
 	"wangguo", "faguo", "wuguo",
 	"javmenu", "pektino", "xszav", "av123",
 	"av520", "pigav", "aoxx69", "javdb",
-"z2_17rip", "z2_321av", "z2_av6k", "z2_7mm", "z2_xanimu",
+	"z2_17rip", "z2_321av", "z2_av6k", "z2_7mm", "z2_xanimu",
 	"z2_cn", "z2_thdh",
 	"xhy11", "jack20", "javguru", "sihu", "tg",
 	"kuaihuo", "avbigplat", "hxc", "hjw", "goodav", "ikun",

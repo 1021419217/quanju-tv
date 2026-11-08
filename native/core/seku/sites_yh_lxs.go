@@ -51,6 +51,7 @@ const yhLxsUA = "Mozilla/5.0 (Linux; Android 13; SM-A205GN) AppleWebKit/537.36 (
 
 var yhLxsKey = []byte("f95277cfbbimgkcusimcuekd3b777pwa")
 var yhLxsIV = []byte("f95277cfbbimgkcu")
+
 const yhLxsSecret = "8DH2lusir4W6uhqFjbCkudNDosdfghjH"
 
 var yhLxsDefaults = map[string]string{

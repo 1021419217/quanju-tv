@@ -11,6 +11,7 @@ import '../downloads/download_picker_page.dart';
 import '../player/playback_handle.dart';
 import '../player/playback_page.dart';
 import '../shell/app_shell.dart';
+import 'author_page.dart';
 import '../widgets/bar_button.dart';
 import '../widgets/cover_backdrop.dart';
 import '../widgets/cover_image.dart';
@@ -476,6 +477,11 @@ class _DetailPageState extends State<DetailPage> {
                         padding: const EdgeInsets.only(top: 14),
                         child: stats,
                       ),
+                    if (_author(drama, m) case final author?)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 6),
+                        child: author,
+                      ),
                     if (_tags(drama, m) case final tags?)
                       Padding(
                         padding: const EdgeInsets.only(top: 10),
@@ -586,6 +592,11 @@ class _DetailPageState extends State<DetailPage> {
           Padding(
             padding: EdgeInsets.only(top: desktop ? 18 : 16),
             child: stats,
+          ),
+        if (_author(drama, m) case final author?)
+          Padding(
+            padding: EdgeInsets.only(top: desktop ? 8 : 6),
+            child: author,
           ),
         if (_tags(drama, m) case final tags?)
           Padding(padding: const EdgeInsets.only(top: 10), child: tags),
@@ -857,6 +868,7 @@ class _DetailPageState extends State<DetailPage> {
                     overflow: TextOverflow.ellipsis,
                     style: sub.copyWith(fontSize: m.meta),
                   ),
+                  if (_author(drama, m) case final author?) author,
                   if (drama.category.isNotEmpty && drama.source != 'xchina-live')
                     Text(
                       drama.category,
@@ -1124,6 +1136,50 @@ class _DetailPageState extends State<DetailPage> {
       style: TextStyle(
         fontSize: m.note,
         color: Theme.of(context).colorScheme.onSurfaceVariant,
+      ),
+    );
+  }
+
+  /// 作者行：有作者就显示，能拿到作者 ID 时可点进作者主页看其它作品。
+  Widget? _author(Drama drama, _Metrics m) {
+    final name = drama.author.trim();
+    if (name.isEmpty) return null;
+    final colors = Theme.of(context).colorScheme;
+    final style = TextStyle(fontSize: m.note, color: colors.onSurfaceVariant);
+    final row = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text('作者：', style: style),
+        Flexible(
+          child: Text(
+            name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: style.copyWith(
+              color: drama.authorId.isEmpty ? null : colors.primary,
+              fontWeight: drama.authorId.isEmpty ? null : FontWeight.w600,
+            ),
+          ),
+        ),
+        if (drama.authorId.isNotEmpty)
+          Icon(Icons.chevron_right, size: m.note + 4, color: colors.primary),
+      ],
+    );
+    if (drama.authorId.isEmpty) return row;
+    return InkWell(
+      borderRadius: BorderRadius.circular(6),
+      onTap: () => openPage<void>(
+        context,
+        (_) => AuthorPage(
+          store: widget.store,
+          source: drama.source,
+          authorId: drama.authorId,
+          authorName: name,
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 2),
+        child: row,
       ),
     );
   }

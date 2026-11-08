@@ -72,15 +72,15 @@ func z2ThdhGet(path string) ([]byte, error) {
 }
 
 type z2ThdhItem struct {
-	ID           int    `json:"id"`
-	Title        string `json:"title"`
-	CoverURL     string `json:"cover_url"`
-	Duration     int    `json:"duration"`
-	AccessType   string `json:"access_type"`
-	Locked       bool   `json:"locked"`
-	PreviewSecs  int    `json:"preview_seconds"`
-	ViewCount    int    `json:"view_count"`
-	CategoryID   int    `json:"category_id"`
+	ID          int    `json:"id"`
+	Title       string `json:"title"`
+	CoverURL    string `json:"cover_url"`
+	Duration    int    `json:"duration"`
+	AccessType  string `json:"access_type"`
+	Locked      bool   `json:"locked"`
+	PreviewSecs int    `json:"preview_seconds"`
+	ViewCount   int    `json:"view_count"`
+	CategoryID  int    `json:"category_id"`
 }
 
 type z2ThdhListResp struct {

@@ -46,6 +46,7 @@ type Config struct {
 	JinguoURL       string
 	JinguoDuanjuURL string
 	HeitaoURL       string
+	BeaboxURL       string
 	Token           string
 	AESKeyHex       string
 	InterfaceKey    string
@@ -91,6 +92,12 @@ type Downloader struct {
 	apiMu                 sync.Mutex
 	apiBase               string
 	apiFailures           map[string]time.Time
+	beaboxMu              sync.Mutex
+	beaboxLoaded          bool
+	beaboxSite            string
+	beaboxPool            []string
+	beaboxPoolNext        time.Time
+	beaboxDiscoverMu      sync.Mutex
 	legacyOnce            sync.Once
 	legacy                *legacyAPIClient
 	previewMu             sync.Mutex
@@ -120,6 +127,8 @@ type nativeDrama struct {
 	Stills         []string      `json:"stills,omitempty"`
 	Related        []nativeDrama `json:"related,omitempty"`
 	ReleaseStatus  string        `json:"releaseStatus,omitempty"`
+	Author         string        `json:"author,omitempty"`
+	AuthorID       string        `json:"authorId,omitempty"`
 	// Peers 在跨源聚合搜索里带上其它站源的同一部剧，供界面一键切换播放源。
 	Peers []nativeDrama `json:"peers,omitempty"`
 }
@@ -147,6 +156,7 @@ type nativeInput struct {
 	Content         string                  `json:"content"`
 	Page            int                     `json:"page"`
 	Query           string                  `json:"query"`
+	AuthorID        string                  `json:"authorId"`
 	Category        string                  `json:"category"`
 	Drama           nativeDrama             `json:"drama"`
 	Chapter         Chapter                 `json:"chapter"`
@@ -275,7 +285,8 @@ func nativeNormalize(drama Drama) nativeDrama {
 		Description: firstNonEmpty(drama.Desc, drama.Intro), Cover: cover, Episodes: episodes,
 		Category: nativeDramaCategory(drama), VIP: drama.VIP,
 		Heat: drama.Heat, Views: drama.Views, OnlineDate: providerReleaseDate(drama.OnlineDate),
-		Tags: append([]string(nil), drama.Tags...), ReleaseStatus: drama.ReleaseStatus}
+		Tags: append([]string(nil), drama.Tags...), ReleaseStatus: drama.ReleaseStatus,
+		Author: drama.Author, AuthorID: drama.AuthorID}
 }
 
 func nativeDramaCategory(drama Drama) string {
@@ -525,6 +536,8 @@ func nativeDispatch(input nativeInput) (any, error) {
 		return engine.loadCover(ctx, input.Drama, input.Force)
 	case "prepareCover":
 		return engine.prepareCover(ctx, input.Drama)
+	case "authorCatalog":
+		return engine.nativeAuthorCatalog(ctx, input)
 	case "detail":
 		return engine.nativeDetail(ctx, input.Drama)
 	case "metadata":
@@ -613,6 +626,29 @@ func nativeDispatch(input nativeInput) (any, error) {
 	default:
 		return nil, errors.New("不支持的应用操作")
 	}
+}
+
+// nativeAuthorCatalog 取某个作者发布的其它作品（目前只有 91porn 有作者主页）。
+// 返回结构与 catalog 一致，Flutter 端复用同一套网格与分页逻辑。
+func (engine *nativeEngine) nativeAuthorCatalog(ctx context.Context, input nativeInput) (nativeCatalogResult, error) {
+	source := canonicalProviderSource(input.Source)
+	result := nativeCatalogResult{Page: input.Page}
+	if result.Page < 1 {
+		result.Page = 1
+	}
+	if source != sourceP91 {
+		return result, errors.New("该站源暂不支持作者主页")
+	}
+	items, more, err := engine.downloader.fetchP91AuthorPage(ctx, input.AuthorID, result.Page)
+	if err != nil {
+		return result, err
+	}
+	result.Items = make([]nativeDrama, 0, len(items))
+	for _, drama := range items {
+		result.Items = append(result.Items, nativeNormalize(drama))
+	}
+	result.HasMore = more
+	return result, nil
 }
 
 func (engine *nativeEngine) nativeCatalog(ctx context.Context, input nativeInput) (nativeCatalogResult, error) {
@@ -767,6 +803,8 @@ func (engine *nativeEngine) nativeCatalog(ctx context.Context, input nativeInput
 		items, result.HasMore, err = d.fetchJinguoCatalogPage(ctx, page, category, "")
 	case sourceHeitao:
 		items, result.HasMore, err = d.fetchHeitaoCatalogPage(ctx, page, category, "")
+	case sourceBeabox:
+		items, result.HasMore, err = d.fetchBeaboxCatalogPage(ctx, page, category, "")
 	default:
 		if isSekuSource(source) {
 			seku.Init(engine.directory)
@@ -779,7 +817,7 @@ func (engine *nativeEngine) nativeCatalog(ctx context.Context, input nativeInput
 	if err != nil && len(items) == 0 {
 		return result, err
 	}
-	if len(items) == 0 && page == 1 && source != sourceHuangju && source != sourceYeguo && source != sourceDSD && source != sourceSorani && source != sourceGuipian && source != sourceHanxiaoquan && source != sourceFanqie && source != sourceJinguoDuanju && source != sourceJinguo && source != sourceHeitao {
+	if len(items) == 0 && page == 1 && source != sourceHuangju && source != sourceYeguo && source != sourceDSD && source != sourceSorani && source != sourceGuipian && source != sourceHanxiaoquan && source != sourceFanqie && source != sourceJinguoDuanju && source != sourceJinguo && source != sourceHeitao && source != sourceBeabox {
 		return result, errors.New("站源暂未返回剧集，请稍后刷新")
 	}
 	if err != nil {
@@ -844,6 +882,8 @@ func (engine *nativeEngine) nativeDetail(ctx context.Context, drama nativeDrama)
 		raw, chapters, err = engine.downloader.fetchJinguoDetail(ctx, sourceID)
 	case sourceHeitao:
 		raw, chapters, err = engine.downloader.fetchHeitaoDetail(ctx, sourceID)
+	case sourceBeabox:
+		raw, chapters, err = engine.downloader.fetchBeaboxDetail(ctx, sourceID)
 	default:
 		title, chapters, err = engine.downloader.GetHuangguoChapters(ctx, source, sourceID)
 	}

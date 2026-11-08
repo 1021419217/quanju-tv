@@ -179,6 +179,12 @@ func mergeNativeDrama(previous, fresh nativeDrama) nativeDrama {
 	if fresh.ReleaseStatus == "" || fresh.ReleaseStatus == "unknown" {
 		fresh.ReleaseStatus = previous.ReleaseStatus
 	}
+	if fresh.Author == "" {
+		fresh.Author = previous.Author
+	}
+	if fresh.AuthorID == "" {
+		fresh.AuthorID = previous.AuthorID
+	}
 	return fresh
 }
 

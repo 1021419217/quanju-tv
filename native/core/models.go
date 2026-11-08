@@ -7,57 +7,61 @@ import (
 )
 
 type Drama struct {
-	VIP               *bool              `json:"vip,omitempty"`
-	ID                string             `json:"id"`
-	Source            string             `json:"source,omitempty"`
-	SourceID          string             `json:"sourceId,omitempty"`
-	Title             string             `json:"title"`
-	Name              string             `json:"name"`
-	Desc              string             `json:"desc"`
-	Intro             string             `json:"intro"`
-	Cover             any                `json:"cover"`
-	CoverURL          any                `json:"coverUrl"`
-	CoverURLSnake     any                `json:"cover_url"`
-	Image             any                `json:"image"`
-	ImageURL          any                `json:"imageUrl"`
-	ImageURLSnake     any                `json:"image_url"`
-	Img               any                `json:"img"`
-	Pic               any                `json:"pic"`
-	Picture           any                `json:"picture"`
-	Poster            any                `json:"poster"`
-	Thumb             any                `json:"thumb"`
-	Thumbnail         any                `json:"thumbnail"`
-	TotalEpisode      any                `json:"totalEpisode"`
-	TotalEpisodeSnake any                `json:"total_episode"`
-	ChapterCount      any                `json:"chapterCount"`
-	ChapterCountSnake any                `json:"chapter_count"`
-	EpisodeCount      any                `json:"episodeCount"`
-	EpisodeCountSnake any                `json:"episode_count"`
-	Total             any                `json:"total"`
-	Episodes          any                `json:"episodes"`
-	Duration          any                `json:"duration"`
-	ChannelName       string             `json:"channelName"`
-	Category          string             `json:"category"`
-	CategoryName      string             `json:"categoryName"`
-	CategoryNameSnake string             `json:"category_name"`
-	TypeName          string             `json:"typeName"`
-	TypeNameSnake     string             `json:"type_name"`
-	SortName          string             `json:"sortName"`
-	SortNameSnake     string             `json:"sort_name"`
-	Remark            string             `json:"remark,omitempty"`
-	Badge             string             `json:"badge,omitempty"`
-	Score             string             `json:"score,omitempty"`
-	Views             string             `json:"views,omitempty"`
-	Heat              string             `json:"heat,omitempty"`
-	OnlineDate        string             `json:"onlineDate,omitempty"`
-	Tags              []string           `json:"tags,omitempty"`
-	ReleaseStatus     string             `json:"releaseStatus,omitempty"`
-	SortMetadata      *sortMetadataState `json:"sortMetadata,omitempty"`
-	Kind              string             `json:"kind,omitempty"`
-	FolderID          string             `json:"folderId,omitempty"`
-	Backdrop          string             `json:"backdrop,omitempty"`
-	Stills            []string           `json:"stills,omitempty"`
-	Related           []Drama            `json:"related,omitempty"`
+	VIP               *bool    `json:"vip,omitempty"`
+	ID                string   `json:"id"`
+	Source            string   `json:"source,omitempty"`
+	SourceID          string   `json:"sourceId,omitempty"`
+	Title             string   `json:"title"`
+	Name              string   `json:"name"`
+	Desc              string   `json:"desc"`
+	Intro             string   `json:"intro"`
+	Cover             any      `json:"cover"`
+	CoverURL          any      `json:"coverUrl"`
+	CoverURLSnake     any      `json:"cover_url"`
+	Image             any      `json:"image"`
+	ImageURL          any      `json:"imageUrl"`
+	ImageURLSnake     any      `json:"image_url"`
+	Img               any      `json:"img"`
+	Pic               any      `json:"pic"`
+	Picture           any      `json:"picture"`
+	Poster            any      `json:"poster"`
+	Thumb             any      `json:"thumb"`
+	Thumbnail         any      `json:"thumbnail"`
+	TotalEpisode      any      `json:"totalEpisode"`
+	TotalEpisodeSnake any      `json:"total_episode"`
+	ChapterCount      any      `json:"chapterCount"`
+	ChapterCountSnake any      `json:"chapter_count"`
+	EpisodeCount      any      `json:"episodeCount"`
+	EpisodeCountSnake any      `json:"episode_count"`
+	Total             any      `json:"total"`
+	Episodes          any      `json:"episodes"`
+	Duration          any      `json:"duration"`
+	ChannelName       string   `json:"channelName"`
+	Category          string   `json:"category"`
+	CategoryName      string   `json:"categoryName"`
+	CategoryNameSnake string   `json:"category_name"`
+	TypeName          string   `json:"typeName"`
+	TypeNameSnake     string   `json:"type_name"`
+	SortName          string   `json:"sortName"`
+	SortNameSnake     string   `json:"sort_name"`
+	Remark            string   `json:"remark,omitempty"`
+	Badge             string   `json:"badge,omitempty"`
+	Score             string   `json:"score,omitempty"`
+	Views             string   `json:"views,omitempty"`
+	Heat              string   `json:"heat,omitempty"`
+	OnlineDate        string   `json:"onlineDate,omitempty"`
+	Tags              []string `json:"tags,omitempty"`
+	ReleaseStatus     string   `json:"releaseStatus,omitempty"`
+	// Author / AuthorID 是发布者（91porn 的上传者、UGC 站的 UP 主）。
+	// 有这两个字段的源，详情页会显示作者并允许点进作者主页看其它作品。
+	Author       string             `json:"author,omitempty"`
+	AuthorID     string             `json:"authorId,omitempty"`
+	SortMetadata *sortMetadataState `json:"sortMetadata,omitempty"`
+	Kind         string             `json:"kind,omitempty"`
+	FolderID     string             `json:"folderId,omitempty"`
+	Backdrop     string             `json:"backdrop,omitempty"`
+	Stills       []string           `json:"stills,omitempty"`
+	Related      []Drama            `json:"related,omitempty"`
 }
 
 func (d Drama) DisplayTitle() string {
@@ -81,8 +85,8 @@ type Chapter struct {
 	PageURL        string          `json:"pageUrl,omitempty"`
 	Referer        string          `json:"referer,omitempty"`
 	// Routes 同一集在其它播放线路上的播放页地址（XBPQ 自定义源多线路切换用）。
-	Routes         []string        `json:"routes,omitempty"`
-	Vertical       *bool           `json:"vertical,omitempty"`
+	Routes   []string `json:"routes,omitempty"`
+	Vertical *bool    `json:"vertical,omitempty"`
 }
 
 func (c Chapter) EpisodeString(fallback int) string {

@@ -211,6 +211,13 @@ abstract class AppRepository {
   });
   Future<CatalogPage> cached(String source, {String category = ''});
 
+  /// 某个作者发布的其它作品（目前只有 91porn 有作者主页）。
+  Future<CatalogPage> authorCatalog(
+    String source,
+    String authorId, {
+    int page = 1,
+  }) => throw AppFailure('当前环境不支持作者主页');
+
   /// 跨源聚合搜索：启动一轮并发搜索并立刻返回首个快照，
   /// 之后用 [searchPoll] 增量取结果，无需等所有站源搜完。
   Future<SearchProgress> searchStart(List<String> sources, String query) =>
@@ -578,7 +585,7 @@ class NativeRepository extends AppRepository {
           action == 'danmaku') {
         _authorize('hongguo');
       }
-      if ({'catalog', 'cached', 'categories'}.contains(action)) {
+      if ({'catalog', 'cached', 'categories', 'authorCatalog'}.contains(action)) {
         _authorize(input['source'] as String);
       }
       if ({
@@ -753,6 +760,19 @@ class NativeRepository extends AppRepository {
       'query': query,
       'category': category,
       'force': force,
+    }),
+  );
+  @override
+  Future<CatalogPage> authorCatalog(
+    String source,
+    String authorId, {
+    int page = 1,
+  }) async => CatalogPage.fromJson(
+    await _call({
+      'action': 'authorCatalog',
+      'source': source,
+      'authorId': authorId,
+      'page': page,
     }),
   );
   @override
