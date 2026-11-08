@@ -616,6 +616,7 @@ class PlaybackSession extends ChangeNotifier {
             '改用线路 ${plan.routeIndex + 1}/${plan.routeCount}',
           );
         }
+        final autoPlay = _foreground && _playIntent;
         await player.open(
           Media(
             plan.url,
@@ -624,7 +625,7 @@ class PlaybackSession extends ChangeNotifier {
                 ? Duration(milliseconds: (position * 1000).round())
                 : null,
           ),
-          play: _foreground && _playIntent,
+          play: autoPlay,
         );
         if (!_current(ticket)) return;
         _openedIndex = index;
@@ -635,6 +636,18 @@ class PlaybackSession extends ChangeNotifier {
         _notify();
         danmaku.setPlan(plan);
         _syncDanmaku();
+        // autoPlay 为 false 只应发生在「用户主动暂停 / 退到后台」这类确实
+        // 不想播的情况。若 open 那一瞬因前台标志抖动取到 false、但此刻播放
+        // 意图仍成立，就补一次起播：否则新集地址与首帧都正常、唯独没在播，
+        // 表现为换集后「画面动一下就卡住，要手动点一下才出播放按钮」。
+        // 正常换集 autoPlay=true，整个 if 不执行，零副作用。
+        if (!autoPlay &&
+            _current(ticket) &&
+            _foreground &&
+            _playIntent &&
+            _error == null) {
+          unawaited(player.play().catchError((Object _) {}));
+        }
       });
     } catch (error) {
       if (_current(ticket)) {
@@ -695,11 +708,27 @@ class PlaybackSession extends ChangeNotifier {
     danmaku.setPlan(plan);
     _notify();
     _syncDanmaku();
+    // 备用播放器是用 play:false 预加载的（见 _open），换绑后必须先把「播放
+    // 意图」落实成一次真实的 play()，再做缓存/音量/倍速这些配置。以前把
+    // play() 排在三个 await 之后还带条件，任一 await 抖动或串行倍速队列卡住，
+    // 新集就会停在「首帧已出、但没在播」：画面动一下就卡住，而 _playIntent
+    // 仍是 true，连暂停按钮都不显示，只能靠手动点一下翻转状态才恢复。
+    if (_current(ticket) && _foreground && _playIntent) {
+      unawaited(next.play().catchError((Object _) {}));
+    }
     try {
       await _limitCache(next, false);
       await next.setVolume(volume);
       await _setRate(_rate);
-      if (_current(ticket) && _foreground && _playIntent) await next.play();
+      // 配置过程中底层状态若回落到暂停，再补一次；正常播放时 state.playing
+      // 已为 true，这里不会触发，不影响任何正常换集。
+      if (_current(ticket) &&
+          _foreground &&
+          _playIntent &&
+          !next.state.playing &&
+          !next.state.completed) {
+        unawaited(next.play().catchError((Object _) {}));
+      }
     } catch (_) {
       if (_current(ticket)) _queueRecovery('open_exception');
     }

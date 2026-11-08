@@ -215,6 +215,8 @@ class _PortraitPlayerPageState extends State<PortraitPlayerPage>
     }
     // 其余区域（含最左侧）：长按即临时倍速，松手恢复，下滑锁定倍速档位。
     // 播放设置不再从长按进入，改由底部「设置」选项卡按钮打开。
+    // 倍速期间挂起横向快进，避免按住倍速时手轻微抖动被结算成快进/快退。
+    _gestures.setSeekSuspended(true);
     if (!_session.boostLocked) _session.holdBoost();
     unawaited(HapticFeedback.selectionClick());
     setState(() {
@@ -237,6 +239,9 @@ class _PortraitPlayerPageState extends State<PortraitPlayerPage>
   }
 
   void _pressEnd() {
+    // 成对解除倍速长按的快进挂起；亮度长按（hold）从未挂起，这里是 no-op。
+    // 放在 _holding 判断之前，确保任何退出路径都不会把挂起状态留在手势里。
+    _gestures.setSeekSuspended(false);
     if (!_holding) return;
     if (_overMask) {
       _session.setBoostLocked(!_session.boostLocked);
@@ -365,8 +370,7 @@ class _PortraitPlayerPageState extends State<PortraitPlayerPage>
                   onPointerMove: _gestures.pointerMove,
                   onPointerUp: _gestures.pointerUp,
                   onPointerCancel: _gestures.pointerCancel,
-                  child: GestureDetector(
-                    behavior: HitTestBehavior.opaque,
+                  child: PlayerHoldGesture(
                     onTapUp: (_) {
                       // 刚做完滑动/亮度手势时抬手的事件不应再被当成「点按」。
                       if (_gestures.suppressTap) return;

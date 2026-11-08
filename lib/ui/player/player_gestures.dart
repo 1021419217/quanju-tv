@@ -84,6 +84,10 @@ class PlayerGestures extends ChangeNotifier {
   /// 与视频总时长无关，避免长视频「手稍微一动就跳几十分钟」。
   static const int _seekSpanSeconds = 120;
 
+  /// 屏幕最左侧的系统返回手势窄带宽度（逻辑像素）。
+  /// iOS 从左边缘右滑返回时会被系统手势接管，这段起手点不能算快进。
+  static const double _systemEdgeWidth = 28;
+
   double _swipeThreshold = 70;
   double _horizontalThreshold = 60;
   double _brightness = .5;
@@ -91,6 +95,11 @@ class PlayerGestures extends ChangeNotifier {
   double _volumeStart = 100;
   bool _moved = false;
   bool _leftZone = false;
+  /// 长按临时倍速进行中：期间不结算横向快进/快退。
+  bool _seekSuspended = false;
+  /// 本次手势是否曾处于倍速长按。长按结束回调与 pointerUp 的先后顺序
+  /// 不固定，用这个记忆量兜底，保证「整段手势」都不结算 seek。
+  bool _seekBlockedThisGesture = false;
   bool _brightnessMode = false;
   bool _held = false;
   bool _disposed = false;
@@ -114,6 +123,20 @@ class PlayerGestures extends ChangeNotifier {
     }
   }
 
+  /// 长按临时倍速开始/结束时由播放页成对调用。倍速期间手指的轻微抖动
+  /// 不应被结算成快进快退；亮度长按（[hold]）不调用本方法，仍保留左右
+  /// 快进能力。
+  void setSeekSuspended(bool value) {
+    if (_disposed || _seekSuspended == value) return;
+    _seekSuspended = value;
+    if (value) {
+      // 记住「整段手势都别快进」，避免长按结束回调先于 pointerUp 时漏判。
+      _seekBlockedThisGesture = true;
+      // 长按成立前若已经误入快进预览，立刻收起预览 HUD。
+      if (_hud.type == SwipeAction.seek) _dismiss();
+    }
+  }
+
   void pointerDown(
     PointerDownEvent event, {
     required double width,
@@ -121,6 +144,19 @@ class PlayerGestures extends ChangeNotifier {
   }) {
     _pointers.add(event.pointer);
     if (_pointers.length != 1) {
+      _reset();
+      return;
+    }
+    // 每一段新手势都重新判定，避免上一次倍速长按的挂起记忆串到这一次。
+    _seekBlockedThisGesture = false;
+    // 起手点落在屏幕最左侧的系统返回手势窄带（仅触摸）：整段手势都不接管，
+    // 保持 _origin 为空即可让 pointerMove / pointerUp 自然跳过，避免 iOS 从
+    // 左边缘右滑返回被结算成快进。非触摸（鼠标）不受影响。
+    if (event.kind == PointerDeviceKind.touch &&
+        width > 0 &&
+        event.localPosition.dx <= _systemEdgeWidth) {
+      // 起手在返回手势窄带：整段不接管，并抑制抬手被当成点按去暂停/切控制条。
+      _ignoreTapUntil = DateTime.now().add(const Duration(milliseconds: 600));
       _reset();
       return;
     }
@@ -182,6 +218,9 @@ class PlayerGestures extends ChangeNotifier {
     }
 
     if (_axis == _Axis.horizontal && dx.abs() >= _horizontalThreshold) {
+      // 长按临时倍速期间（含长按成立前手指已轻微横向移动的那一小段），
+      // 不预览也不结算快进，避免倍速时的手抖被当成快进/快退。
+      if (_seekSuspended || _seekBlockedThisGesture) return;
       // 滑动途中只预览目标位置，抬手才真正跳转，免得一次滑动里反复 seek 拖死解码器。
       _previewSeek(dx);
       return;
@@ -215,10 +254,15 @@ class PlayerGestures extends ChangeNotifier {
     } else if (_hud.type == SwipeAction.brightness) {
       // 长按后没怎么滑动就松手：只收起提示，亮度保持原样。
       _dismiss();
-    } else if (_moved && horizontal && _axis == _Axis.horizontal) {
+    } else if (_moved &&
+        horizontal &&
+        _axis == _Axis.horizontal &&
+        !_seekBlockedThisGesture) {
       _commitSeek(delta.dx);
       _dismiss();
-    } else if (_hud.type == SwipeAction.seek) {
+    } else if (_hud.type == SwipeAction.seek ||
+        (_moved && horizontal && _seekBlockedThisGesture)) {
+      // 倍速长按的整段手势不结算 seek；若有残留的快进预览也一并收起。
       _dismiss();
     } else if (_hud.type == SwipeAction.volume) {
       _dismissLater();
@@ -314,6 +358,11 @@ class PlayerGestures extends ChangeNotifier {
     _axis = _Axis.none;
     _brightnessMode = false;
     _held = false;
+    // 每段手势结束都复位挂起标志，避免长按结束回调丢失时把「禁止快进」
+    // 串到下一段手势。_seekBlockedThisGesture 只在 pointerDown 重置亦可，
+    // 这里一并复位更保险。
+    _seekSuspended = false;
+    _seekBlockedThisGesture = false;
   }
 
   /// 离开播放页时恢复窗口默认亮度。
@@ -453,4 +502,67 @@ class GestureHud extends StatelessWidget {
       ),
     ],
   );
+}
+
+/// 播放器的「点按 + 长按倍速」识别层。
+///
+/// 系统 [GestureDetector] 的长按判定固定为 500ms，长按倍速显得慢半拍。
+/// 这里用 [RawGestureDetector] 显式注册一个 260ms 的
+/// [LongPressGestureRecognizer]，同时保留 [TapGestureRecognizer]，二者在
+/// 同一个手势竞技场里互斥——这正是系统 GestureDetector 内部对
+/// 「点按 + 长按」的处理方式：短按抬手时点按胜出、长按不成立；按住超过
+/// 260ms 时长按胜出、点按被取消。因此只是把触发提前，单击暂停、上下滑
+/// 切集/翻页、双击等原有行为都不变。
+class PlayerHoldGesture extends StatelessWidget {
+  const PlayerHoldGesture({
+    super.key,
+    required this.child,
+    this.onTapUp,
+    this.onLongPressStart,
+    this.onLongPressMoveUpdate,
+    this.onLongPressEnd,
+    this.onLongPressCancel,
+  });
+
+  /// 长按倍速触发时长。系统默认 500ms 偏慢，缩到 260ms 明显跟手，
+  /// 又留一点余量避免正常点按被误判成长按。
+  static const Duration holdDuration = Duration(milliseconds: 260);
+
+  final Widget child;
+  final GestureTapUpCallback? onTapUp;
+  final GestureLongPressStartCallback? onLongPressStart;
+  final GestureLongPressMoveUpdateCallback? onLongPressMoveUpdate;
+  final GestureLongPressEndCallback? onLongPressEnd;
+  final GestureLongPressCancelCallback? onLongPressCancel;
+
+  @override
+  Widget build(BuildContext context) {
+    return RawGestureDetector(
+      behavior: HitTestBehavior.opaque,
+      gestures: <Type, GestureRecognizerFactory>{
+        TapGestureRecognizer:
+            GestureRecognizerFactoryWithHandlers<TapGestureRecognizer>(
+              () => TapGestureRecognizer(debugOwner: this),
+              (TapGestureRecognizer instance) {
+                instance.onTapUp = onTapUp;
+              },
+            ),
+        LongPressGestureRecognizer:
+            GestureRecognizerFactoryWithHandlers<LongPressGestureRecognizer>(
+              () => LongPressGestureRecognizer(
+                duration: holdDuration,
+                debugOwner: this,
+              ),
+              (LongPressGestureRecognizer instance) {
+                instance
+                  ..onLongPressStart = onLongPressStart
+                  ..onLongPressMoveUpdate = onLongPressMoveUpdate
+                  ..onLongPressEnd = onLongPressEnd
+                  ..onLongPressCancel = onLongPressCancel;
+              },
+            ),
+      },
+      child: child,
+    );
+  }
 }

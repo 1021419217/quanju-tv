@@ -325,7 +325,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
   void _openGroup(SettingsGroup group) => openPage<void>(
     context,
-    (_) => Scaffold(
+    (pageContext) => Scaffold(
       extendBodyBehindAppBar: true,
       appBar: AppBar(
         surfaceTintColor: Colors.transparent,
@@ -335,7 +335,11 @@ class _SettingsPageState extends State<SettingsPage> {
           child: BarButton(
             icon: Icons.arrow_back_rounded,
             tooltip: '返回',
-            onPressed: () => Navigator.pop(context),
+            // 手机/电视形态下分组页被 push 到「根」Navigator，必须用本页
+            // 自己的 context 出栈。若误用设置主页的 context，pop 的会是
+            // 「设置」tab 自己的 Navigator，把它的初始页弹空，返回后底栏
+            // 还在、内容区却全黑（IndexedStack 那一格变空白）。
+            onPressed: () => Navigator.pop(pageContext),
           ),
         ),
         title: GlassTitle(title: group.label),

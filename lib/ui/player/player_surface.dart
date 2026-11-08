@@ -278,12 +278,16 @@ class _PlayerSurfaceState extends State<PlayerSurface> {
 
   void _pressStart() {
     if (!_session.ready) return;
+    // 倍速期间挂起横向快进，避免按住倍速时轻微手抖被结算成快进/快退。
+    _gestures.setSeekSuspended(true);
     _session.holdBoost();
     unawaited(HapticFeedback.selectionClick());
     _holding = true;
   }
 
   void _pressEnd() {
+    // 成对解除挂起；未进入倍速长按时是 no-op。
+    _gestures.setSeekSuspended(false);
     if (!_holding) return;
     _holding = false;
     _session.endBoost();
@@ -340,8 +344,7 @@ class _PlayerSurfaceState extends State<PlayerSurface> {
                     onPointerMove: _gestures.pointerMove,
                     onPointerUp: _gestures.pointerUp,
                     onPointerCancel: _gestures.pointerCancel,
-                    child: GestureDetector(
-                      behavior: HitTestBehavior.opaque,
+                    child: PlayerHoldGesture(
                       onTapUp: (details) =>
                           _tapUp(details, constraints.maxWidth),
                       onLongPressStart: (_) => _pressStart(),
