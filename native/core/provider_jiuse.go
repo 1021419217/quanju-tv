@@ -60,6 +60,16 @@ var jiuseBaseState struct {
 	checkedAt time.Time
 }
 
+// jiuseHost 判断一个 host 是否属于九色（含镜像域名）。
+func jiuseHost(host string) bool {
+	host = strings.ToLower(strings.TrimPrefix(strings.TrimSpace(host), "www."))
+	switch host {
+	case "91porny.com", "91porny.org", "91porn.mom", "91porn.is":
+		return true
+	}
+	return false
+}
+
 // jiuseBase 返回当前可用的域名，未探测过就是主域。
 func jiuseBase() string {
 	jiuseBaseState.mu.Lock()

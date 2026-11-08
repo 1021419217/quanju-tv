@@ -78,7 +78,7 @@ func (d *Downloader) providerBaseURL(source string) string {
 	case sourceViral:
 		configured, fallback = d.cfg.ViralURL, viralBaseURL
 	case sourceJiuse:
-		configured, fallback = d.cfg.JiuseURL, jiuseBaseURL
+		configured, fallback = d.cfg.JiuseURL, jiuseBase()
 	case sourceJinguoDuanju:
 		configured, fallback = d.cfg.JinguoDuanjuURL, jinguoDuanjuBaseURL
 	case sourceJinguo:
@@ -134,7 +134,7 @@ func providerSourceForURL(raw string) string {
 		return sourceKissav
 	case host == "viralxxxporn.com" || host == "www.viralxxxporn.com":
 		return sourceViral
-	case host == "91porny.com" || host == "www.91porny.com":
+	case jiuseHost(host):
 		return sourceJiuse
 	case host == "91porn.com" || host == "www.91porn.com":
 		return sourceP91
