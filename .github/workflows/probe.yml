@@ -1,4 +1,4 @@
-name: Probe site
+name: Probe jiuse entry
 
 on:
   workflow_dispatch:
@@ -9,34 +9,67 @@ permissions:
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 12
     steps:
-      - name: 抓 91 作者页与九色分类页结构
+      - name: 对比入口对播放地址与 CDN 判定的影响
         run: |
-          UA91="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-          KEY=e7f9b65d89f5238b6211
-          REF="https://91porn.com/view_video.php?viewkey=$KEY"
-          curl -sSL -m 30 -A "$UA91" -H "Cookie: language=cn_CN; ga=1" "$REF" -o /tmp/d.html
-          echo "===== detail author links"
-          grep -oE 'href="[^"]*u(profile|videos)\.php\?UID=[^"]*"[^>]*>[^<]{0,40}' /tmp/d.html | head -5
-          AUID=$(grep -oE 'u(profile|videos)\.php\?UID=([0-9A-Za-z_-]+)' /tmp/d.html | head -1 | sed 's/.*UID=//')
-          echo "AUID=$AUID"
-          echo "===== uvideos page"
-          curl -sSL -m 30 -A "$UA91" -H "Cookie: language=cn_CN; ga=1" -e "$REF" "https://91porn.com/uvideos.php?UID=$AUID&page=1" -o /tmp/u.html -w "http=%{http_code} bytes=%{size_download}\n"
-          echo "--- viewkey links"
-          grep -oE 'view_video\.php\?[^"]{0,80}' /tmp/u.html | head -8
-          echo "--- own= links"
-          grep -oE '[^"]{0,60}own=1[^"]{0,60}' /tmp/u.html | head -5
-          echo "--- card sample"
-          grep -oE '.{0,80}viewkey.{0,80}' /tmp/u.html | head -6
-          echo "===== uprofile page"
-          curl -sSL -m 30 -A "$UA91" -H "Cookie: language=cn_CN; ga=1" -e "$REF" "https://91porn.com/uprofile.php?UID=$AUID" -o /tmp/p.html -w "http=%{http_code} bytes=%{size_download}\n"
-          grep -oE 'view_video\.php\?[^"]{0,80}' /tmp/p.html | head -5
-          echo "===== jiuse category"
           UA="Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
-          for C in latest hot-list ori hd; do
-            echo "-- $C"
-            curl -sSL -m 25 -A "$UA" "https://91porny.com/video/category/$C" -o /tmp/jc.html -w "http=%{http_code} bytes=%{size_download}\n"
-            echo "cards=$(grep -c 'colVideoList' /tmp/jc.html) views=$(grep -c 'href="/video/view/' /tmp/jc.html)"
-            grep -oE 'href="/video/view/[0-9a-f]+"' /tmp/jc.html | head -2
-          done
+          SITE=https://91porny.com
+          J=/tmp/cj.txt; rm -f $J
+
+          echo "===== 1. 首页卡片链接形态"
+          curl -sSL -m 30 -A "$UA" -c $J "$SITE/video/index" -o /tmp/home.html -w "http=%{http_code} bytes=%{size_download}\n"
+          echo "--- 卡片 href 样本"
+          grep -oE 'href="/video/[^"]{5,80}"' /tmp/home.html | sort | uniq -c | sort -rn | head -12
+          echo "--- 卡片外层（找 from/vip/hd 标记）"
+          grep -oE '.{0,140}href="/video/view/[0-9a-f]+"[^>]*>.{0,120}' /tmp/home.html | head -3
+          KEY=$(grep -oE 'href="/video/view/[0-9a-f]+"' /tmp/home.html | head -1 | sed -E 's#.*/video/view/([0-9a-f]+).*#\1#')
+          echo "KEY=$KEY"
+          echo "--- 首页按钮/标签里带 vip|hd|vip 字样的行数"
+          grep -coE 'VIP|vip|高清' /tmp/home.html
+
+          det() { # $1 name, $2 url, $3 referer, $4 extra-header
+            echo "===== DETAIL: $1  ($2)"
+            if [ -n "$4" ]; then
+              curl -sSL -m 30 -A "$UA" -b $J -c $J -e "$3" -H "$4" "$2" -o /tmp/d_$1.html -w "http=%{http_code} bytes=%{size_download}\n"
+            else
+              curl -sSL -m 30 -A "$UA" -b $J -c $J -e "$3" "$2" -o /tmp/d_$1.html -w "http=%{http_code} bytes=%{size_download}\n"
+            fi
+            echo "--- video 标签属性"
+            grep -oE '<video[^>]{0,400}>' /tmp/d_$1.html | head -2
+            grep -oE "data-src=\"[^\"]{0,200}\"|data-video=\"[^\"]{0,200}\"|<source[^>]{0,200}>" /tmp/d_$1.html | head -4
+            echo "--- 页面里所有 m3u8"
+            grep -oE 'https?://[^"'"'"' <>]{10,180}\.m3u8[^"'"'"' <>]{0,80}' /tmp/d_$1.html | sort -u | head -6
+            echo "--- 双引号内 /s/ 片段地址"
+            grep -oE '"(/[^"]{0,160}/hls/[^"]{0,80})"' /tmp/d_$1.html | sort -u | head -4
+            echo "--- 会员提示"
+            grep -coE 'VIP|开通|注册|登录后|会员' /tmp/d_$1.html
+          }
+
+          det plain  "$SITE/video/view/$KEY" "" ""
+          det google "$SITE/video/view/$KEY" "https://www.google.com/" ""
+          det bing   "$SITE/video/view/$KEY" "https://www.bing.com/" ""
+          det utm    "$SITE/video/view/$KEY?utm_source=google&utm_medium=organic" "" ""
+          det noref  "$SITE/video/view/$KEY" "" "X-Requested-With: XMLHttpRequest"
+
+          echo "===== 2. 备用线路页面"
+          curl -sSL -m 25 -A "$UA" -b $J -c $J -e "https://www.google.com/" "$SITE/video/viewhd/$KEY" -o /tmp/d_hd.html -w "viewhd http=%{http_code} bytes=%{size_download}\n"
+          grep -oE 'https?://[^"'"'"' <>]{10,180}\.m3u8[^"'"'"' <>]{0,80}' /tmp/d_hd.html | sort -u | head -4
+
+          echo "===== 3. 对同一个 m3u8 换 Referer 取流"
+          M3U8=$(grep -oE 'https?://[^"'"'"' <>]{10,180}\.m3u8[^"'"'"' <>]{0,80}' /tmp/d_plain.html | head -1)
+          echo "M3U8=$M3U8"
+          if [ -n "$M3U8" ]; then
+            for R in "https://91porny.com/video/view/$KEY" "https://www.google.com/" ""; do
+              echo "-- referer=[$R]"
+              curl -sS -m 20 -A "$UA" -b $J -e "$R" -D /tmp/h.txt -o /tmp/m.txt "$M3U8" -w "  http=%{http_code} bytes=%{size_download}\n" || true
+              grep -iE "^(HTTP|content-type|x-video-notice|server|content-length)" /tmp/h.txt | tr -d '\r' | head -5
+              head -c 220 /tmp/m.txt | tr -d '\000' | head -4
+            done
+          fi
+
+          echo "===== 4. 搜索引擎收录的链接形态（Bing）"
+          curl -sSL -m 25 -A "$UA" "https://www.bing.com/search?q=site%3A91porny.com&count=30" -o /tmp/b.html -w "http=%{http_code} bytes=%{size_download}\n"
+          grep -oE 'https://91porny\.com/video/[^"&<> ]{0,80}' /tmp/b.html | sort -u | head -10
+          echo "--- bing 结果里的分类/作者入口"
+          grep -oE 'https://91porny\.com/(video/category|author)/[^"&<> ]{0,40}' /tmp/b.html | sort -u | head -8
