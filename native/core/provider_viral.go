@@ -88,9 +88,10 @@ func viralCategoryName(key string) string {
 	return ""
 }
 
-// validViralID 校验 "551431/slug" 形式的站内 ID。
+// validViralID 校验 "551431~slug" 形式的站内 ID。
+// 不用 "/" 分隔：这个 ID 会进缓存键与下载目录，带路径分隔符会多出一层目录。
 func validViralID(id string) bool {
-	parts := strings.SplitN(strings.TrimSpace(id), "/", 2)
+	parts := strings.SplitN(strings.TrimSpace(id), "~", 2)
 	if len(parts) != 2 {
 		return false
 	}
@@ -136,7 +137,12 @@ func viralDrama(sourceID, title, cover, category string) Drama {
 	return drama
 }
 
-// viralIDFromHref 把 "/zh/video/551431/some-title/" 归一成 "551431/some-title"。
+// viralPagePath 把站内 ID 还原成详情页路径里的 "数字/slug"。
+func viralPagePath(sourceID string) string {
+	return strings.Replace(strings.TrimSpace(sourceID), "~", "/", 1)
+}
+
+// viralIDFromHref 把 "/zh/video/551431/some-title/" 归一成 "551431~some-title"。
 func viralIDFromHref(pageText string) (string, string) {
 	match := reViralCardHref.FindStringSubmatch(pageText)
 	if match == nil {
@@ -147,7 +153,7 @@ func viralIDFromHref(pageText string) (string, string) {
 	if slug == "" {
 		return "", ""
 	}
-	return match[1] + "/" + slug, match[1]
+	return match[1] + "~" + slug, match[1]
 }
 
 func viralDurationSeconds(text string) int {
@@ -281,13 +287,13 @@ func (d *Downloader) fetchViralDetail(ctx context.Context, sourceID string) (Dra
 	if !validViralID(sourceID) {
 		return Drama{}, nil, errors.New("ViralXXX 视频 ID 无效")
 	}
-	pageURL := viralBaseURL + viralSitePath + "/video/" + sourceID + "/"
+	pageURL := viralBaseURL + viralSitePath + "/video/" + viralPagePath(sourceID) + "/"
 	pageText, err := d.fetchProviderText(ctx, pageURL, viralBaseURL+viralSitePath+"/")
 	if err != nil {
 		return Drama{}, nil, err
 	}
 	// 防「点 A 变 B」：页面上必须真的出现这个视频的数字 ID。
-	numericID := strings.SplitN(sourceID, "/", 2)[0]
+	numericID := strings.SplitN(sourceID, "~", 2)[0]
 	if !strings.Contains(pageText, "video_id: '"+numericID+"'") && !strings.Contains(pageText, "/video/"+numericID+"/") {
 		return Drama{}, nil, errors.New("ViralXXX 详情与请求视频不符，请刷新重试")
 	}
@@ -327,7 +333,7 @@ func (d *Downloader) resolveViralMedia(ctx context.Context, task Task) (provider
 	if !valid || source != sourceViral || !validViralID(sourceID) || !strings.HasPrefix(task.Chapter.ID, prefix) {
 		return providerMedia{}, errors.New("ViralXXX 播放信息无效，请刷新详情")
 	}
-	pageURL := viralBaseURL + viralSitePath + "/video/" + sourceID + "/"
+	pageURL := viralBaseURL + viralSitePath + "/video/" + viralPagePath(sourceID) + "/"
 	address := strings.TrimSpace(task.Chapter.VideoURL)
 	if !isProviderHTTPMediaURL(address) {
 		// 详情页没带出地址：回源重解析一次。

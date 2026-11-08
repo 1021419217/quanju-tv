@@ -63,7 +63,7 @@ func TestViralCardsParseCoverWithoutSpace(t *testing.T) {
 		t.Fatalf("卡片数错误: %d", len(items))
 	}
 	item := items[0]
-	if item.SourceID != "547954/comatozze-step" {
+	if item.SourceID != "547954~comatozze-step" {
 		t.Fatalf("ID 错误: %s", item.SourceID)
 	}
 	if item.Title != "ComaTozze Step" {
