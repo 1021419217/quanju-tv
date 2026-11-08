@@ -34,9 +34,11 @@ const (
 	siteAnalyzerMobileUA = "Mozilla/5.0 (Linux; Android 14; Pixel 8 Build/UQ1A.240205.002) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/124.0.0.0 Mobile Safari/537.36"
 	siteAnalyzerPCUA     = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 	// 单个探测请求最多等这么久；fetchProviderText 自己的重试/退避也受这个 ctx 约束。
-	siteAnalyzerRequestTimeout = 4 * time.Second
+	// 跨境站点 4 秒常常连首页都等不到就快速失败，表现为「啥也识别不出来」，
+	// 放宽到 8 秒；总预算同步放到 60 秒，仍在 Go dispatch 90s / Dart 100s 之内。
+	siteAnalyzerRequestTimeout = 8 * time.Second
 	// 一次自动识别的总预算，防止探测候选路径时把 RPC 拖死。
-	siteAnalyzerBudget = 45 * time.Second
+	siteAnalyzerBudget = 60 * time.Second
 	// 最多发这么多请求（首页 4 + 分类/兜底 10 + 搜索 7 + 详情 1 + 若干余量）。
 	siteAnalyzerMaxRequests = 26
 )
@@ -380,6 +382,9 @@ func (d *Downloader) analyzeCustomSourceSite(ctx context.Context, raw string) (s
 		result.Notes = a.notes
 		return result, nil
 	}
+
+	// 任何回落路径都先留下站点标识，避免诊断区一片空白让用户以为「啥也没干」。
+	a.note("识别目标：%s（%s）", result.Name, a.origin)
 
 	a.homeHTML = a.fetchHome()
 	if a.homeHTML == "" {

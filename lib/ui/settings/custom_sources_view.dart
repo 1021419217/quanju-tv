@@ -470,9 +470,30 @@ class _CustomSourceEditorState extends State<_CustomSourceEditor> {
       setState(() => _error = '粘贴规则 JSON 后再保存，或关闭规则开关');
       return;
     }
-    if (!_ruleMode && _base.text.trim().isEmpty) {
+    final rawBase = _base.text.trim();
+    if (!_ruleMode && rawBase.isEmpty) {
       setState(() => _error = '请填写源网址');
       return;
+    }
+    // Go 核心要求完整 http(s) 地址；浏览器复制有时只有域名，补齐协议再存，
+    // 并写回输入框让用户看到实际保存的地址。
+    var base = rawBase;
+    if (base.isNotEmpty && !base.contains('://')) {
+      base = 'https://$base';
+      _base.text = base;
+    }
+    // Go 核心要求源名称必填。自动识别失败时不会生成规则、也不会回填站名，
+    // 若这里不兜底，用户「只粘网址 → 点保存」会被后端拒绝，表现为按钮闪一下
+    // 却存不进去。名称留空时从网址域名补一个，保证普通网页源也能保存；
+    // 规则模式下后端会从规则「主页url」补名，这里不硬拦。
+    var name = _name.text.trim();
+    if (name.isEmpty && base.isNotEmpty) {
+      final uri = Uri.tryParse(base);
+      final host = (uri?.host ?? '').replaceFirst(RegExp(r'^www\.'), '');
+      if (host.isNotEmpty) {
+        name = host;
+        _name.text = name;
+      }
     }
     setState(() {
       _busy = true;
@@ -482,16 +503,16 @@ class _CustomSourceEditorState extends State<_CustomSourceEditor> {
       final existing = widget.existing;
       if (existing == null) {
         await widget.repository.addCustomSource(
-          name: _name.text.trim(),
-          base: _base.text.trim(),
+          name: name,
+          base: base,
           rule: rule,
           kind: _kind,
         );
       } else {
         await widget.repository.updateCustomSource(
           existing.id,
-          name: _name.text.trim(),
-          base: _base.text.trim(),
+          name: name,
+          base: base,
           rule: rule,
           kind: _kind,
         );
@@ -554,8 +575,15 @@ class _CustomSourceEditorState extends State<_CustomSourceEditor> {
                   '。规则已回填，可直接保存，也可在下方微调后保存；想换站识别，直接改上面的网址再点一次。'
               : '已生成规则，但引擎实测未能完成（分类页抓取失败或超时）：规则未经实测验证，保存后请自行确认能否取到内容。想换站识别，直接改上面的网址再点一次。';
         } else {
+          // 识别不出规则也要把站名带回来：Go 侧名称必填，且让用户看到这次
+          // 识别至少拿到了站点标识，而不是一片空白。
+          if (_name.text.trim().isEmpty) {
+            _name.text = (result['name'] as String? ?? '').trim();
+          }
           _analysisSummary =
-              '未能识别出可用规则：引擎实测取不到内容或站点是动态渲染，已保留为普通网页源（引擎会自动适配 MacCMS 站点），也可以手动粘贴规则。具体原因见下方诊断。';
+              '未能识别出可用规则：引擎实测取不到内容或站点是动态渲染。已保留为普通网页源，'
+              '源名称已按网址自动补齐，可直接点「保存」（引擎会自动适配 MacCMS 站点）；'
+              '若该站并非 MacCMS，保存后可能仍取不到内容，可手动粘贴规则。具体原因见下方诊断。';
         }
       });
     } catch (error) {
@@ -580,6 +608,26 @@ class _CustomSourceEditorState extends State<_CustomSourceEditor> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // 校验/后端错误放在最上方：以前排在滚动区最底部，保存失败时
+            // 用户只看见按钮闪一下，根本不知道是「源名称必填」之类的原因。
+            if (_error case final error?)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.errorContainer,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    error,
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.onErrorContainer,
+                    ),
+                  ),
+                ),
+              ),
             TextField(
               controller: _name,
               enabled: !_busy,
@@ -708,14 +756,6 @@ class _CustomSourceEditorState extends State<_CustomSourceEditor> {
                       ],
                     ],
                   ),
-                ),
-              ),
-            if (_error case final error?)
-              Padding(
-                padding: const EdgeInsets.only(top: 12),
-                child: Text(
-                  error,
-                  style: TextStyle(color: Theme.of(context).colorScheme.error),
                 ),
               ),
           ],

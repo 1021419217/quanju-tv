@@ -140,3 +140,55 @@ func TestSiteAnalyzerFetchFailureDoesNotDiscardRule(t *testing.T) {
 		t.Fatalf("未标注「未经实测验证」: %v", result.Notes)
 	}
 }
+
+// TestCustomSourceEmptyNameRejected 实证 3.8「保存按钮点一下闪一下」的根因：
+// Go 核心要求源名称必填，而识别不出规则时 UI 不回填名称，保存必然被后端拒绝。
+func TestCustomSourceEmptyNameRejected(t *testing.T) {
+	registry := newCustomMaccmsRegistry(t.TempDir())
+	_, err := registry.add("", "https://example.com", "", "")
+	if err == nil || !strings.Contains(err.Error(), "源名称") {
+		t.Fatalf("空名称应当被拒，实际: %v", err)
+	}
+}
+
+// TestCustomSourceAutoNameFromBase 验证 UI 兜底补名后，普通网页源能正常落盘。
+func TestCustomSourceAutoNameFromBase(t *testing.T) {
+	registry := newCustomMaccmsRegistry(t.TempDir())
+	record, err := registry.add("example.com", "https://example.com", "", "web")
+	if err != nil {
+		t.Fatalf("补齐名称后仍无法保存: %v", err)
+	}
+	if record.Name != "example.com" || record.Base != "https://example.com" {
+		t.Fatalf("落盘记录不符: %+v", record)
+	}
+}
+
+// TestSiteAnalyzerFallbackKeepsSiteIdentity 任何回落路径都必须带回站点标识，
+// 否则 UI 上就是「啥也识别不出来」，且名称为空会连带导致保存失败。
+func TestSiteAnalyzerFallbackKeepsSiteIdentity(t *testing.T) {
+	for name, fixture := range map[string]http.Handler{
+		"抓取失败保留规则": newFetchFailureFixture(),
+		"假阳性回落":    newFalsePositiveFixture(),
+	} {
+		t.Run(name, func(t *testing.T) {
+			server := httptest.NewServer(fixture)
+			defer server.Close()
+			d := &Downloader{
+				cfg:           Config{Retries: 1},
+				client:        server.Client(),
+				limiter:       newRequestLimiter(20, 0),
+				providerHosts: map[string]string{},
+			}
+			result, err := d.analyzeCustomSourceSite(context.Background(), server.URL)
+			if err != nil {
+				t.Fatalf("自动识别失败: %v", err)
+			}
+			if result.Name == "" || result.Base == "" {
+				t.Fatalf("回落路径丢了站点标识: %+v", result)
+			}
+			if !strings.Contains(strings.Join(result.Notes, ""), "识别目标") {
+				t.Fatalf("诊断区缺少站点标识: %v", result.Notes)
+			}
+		})
+	}
+}
