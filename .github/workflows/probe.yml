@@ -55,6 +55,7 @@ jobs:
           while read -r U; do
             i=$((i+1))
             echo "-- [$i] $(echo "$U" | cut -c1-100)"
-            curl -sSL -m 25 -A "$UA" -e "https://91porn.com/view_video.php?viewkey=$KEY" -H "Range: bytes=0-65535" -D /tmp/hh.txt "$U" -o /tmp/bb.bin -w "  http=%{http_code} bytes=%{size_download} type=%{content_type}\n"
-            head -8 /tmp/bb.bin | tr -d '\0' | head -3
+            curl -sSLk -m 25 -A "$UA" -e "https://91porn.com/view_video.php?viewkey=$KEY" -H "Range: bytes=0-65535" -D /tmp/hh.txt "$U" -o /tmp/bb.bin -w "  http=%{http_code} bytes=%{size_download} type=%{content_type}\n" || true
+            echo "  headers:"; grep -iE "^(HTTP|content-type|content-length|server|x-)" /tmp/hh.txt | head -5 | tr -d "\r"
+            head -c 200 /tmp/bb.bin | tr -d '\0' | head -3
           done < urls.txt
