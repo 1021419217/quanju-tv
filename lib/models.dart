@@ -35,6 +35,7 @@ class SourceSite {
       id == 'kissav' ||
       id == 'viral' ||
       id == 'jiuse' ||
+      id == 'hsex' ||
       id == 'theporny' ||
       id == 'jinguoduanju' ||
       id == 'jinguo' ||
@@ -100,6 +101,9 @@ class SourceSite {
 
   /// 九色 / 91PORNY：与 91porn 同源（viewkey 一致），HLS 播放，四条 CDN 线路自动切换。
   static const jiuse = SourceSite('jiuse', '九色', '91同源 · 免费老片 · 作者作品');
+
+  /// 好色TV：Bootstrap 服务端渲染站，详情页直给 m3u8，无需会员。
+  static const hsex = SourceSite('hsex', '好色TV', '最新 · 排行榜 · 在线搜索');
 
   /// 短剧家族内置源（全剧视界可用），与 Go 侧 duanjuProviderCatalog 对齐。
   static const duanjuValues = [
@@ -249,6 +253,7 @@ class SourceSite {
     kissav,
     viral,
     jiuse,
+    hsex,
   ];
   static const knownValues = [...primaryValues, ...restrictedValues];
   static const allValues = [...primaryValues, ...restrictedValues];

@@ -14,6 +14,7 @@ import '../../models.dart';
 import '../app_scope.dart';
 import '../explore/explore_page.dart';
 import '../explore/source_actions.dart';
+import '../downloads/downloads_page.dart';
 import '../follow/follow_page.dart';
 import '../settings/settings_page.dart';
 import '../widgets/bar_button.dart';
@@ -208,8 +209,21 @@ class _AppShellState extends State<AppShell>
       );
   }
 
+  void _openDownloads(BuildContext context) => openPage<void>(
+    context,
+    (_) => DownloadsPage(
+      store: widget.store,
+      downloads: _downloads!,
+      converter: _converter!,
+    ),
+  );
+
   Widget _root(AppTab tab) => switch (tab) {
-    AppTab.explore => ExplorePage(key: _explore, store: widget.store),
+    AppTab.explore => ExplorePage(
+      key: _explore,
+      store: widget.store,
+      onOpenDownloads: () => _openDownloads(context),
+    ),
     AppTab.follow => FollowPage(
       store: widget.store,
       entryFocus: _followEntry,

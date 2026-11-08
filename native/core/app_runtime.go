@@ -827,6 +827,8 @@ func (engine *nativeEngine) nativeCatalog(ctx context.Context, input nativeInput
 		items, result.HasMore, err = d.fetchViralCatalogPage(ctx, page, category, "")
 	case sourceJiuse:
 		items, result.HasMore, err = d.fetchJiuseCatalogPage(ctx, page, category, "")
+	case sourceHsex:
+		items, result.HasMore, err = d.fetchHsexCatalogPage(ctx, page, category, "")
 	default:
 		if isSekuSource(source) {
 			seku.Init(engine.directory)
@@ -839,7 +841,7 @@ func (engine *nativeEngine) nativeCatalog(ctx context.Context, input nativeInput
 	if err != nil && len(items) == 0 {
 		return result, err
 	}
-	if len(items) == 0 && page == 1 && source != sourceHuangju && source != sourceYeguo && source != sourceDSD && source != sourceSorani && source != sourceGuipian && source != sourceHanxiaoquan && source != sourceFanqie && source != sourceJinguoDuanju && source != sourceJinguo && source != sourceHeitao && source != sourceBeabox && source != sourceKissav && source != sourceViral && source != sourceJiuse {
+	if len(items) == 0 && page == 1 && source != sourceHuangju && source != sourceYeguo && source != sourceDSD && source != sourceSorani && source != sourceGuipian && source != sourceHanxiaoquan && source != sourceFanqie && source != sourceJinguoDuanju && source != sourceJinguo && source != sourceHeitao && source != sourceBeabox && source != sourceKissav && source != sourceViral && source != sourceJiuse && source != sourceHsex {
 		return result, errors.New("站源暂未返回剧集，请稍后刷新")
 	}
 	if err != nil {
@@ -912,6 +914,8 @@ func (engine *nativeEngine) nativeDetail(ctx context.Context, drama nativeDrama)
 		raw, chapters, err = engine.downloader.fetchViralDetail(ctx, sourceID)
 	case sourceJiuse:
 		raw, chapters, err = engine.downloader.fetchJiuseDetail(ctx, sourceID)
+	case sourceHsex:
+		raw, chapters, err = engine.downloader.fetchHsexDetail(ctx, sourceID)
 	default:
 		title, chapters, err = engine.downloader.GetHuangguoChapters(ctx, source, sourceID)
 	}

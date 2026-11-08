@@ -109,6 +109,7 @@ class _DownloadedDramaPageState extends State<DownloadedDramaPage> {
       ]),
       index: index,
       position: position,
+      localOnly: true,
     );
     handle.session.start(index, position: position);
     await Navigator.of(context, rootNavigator: true).push(

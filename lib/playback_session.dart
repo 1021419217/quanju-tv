@@ -43,8 +43,12 @@ class PlaybackSession extends ChangeNotifier {
     required int index,
     double position = 0,
     bool autoplay = true,
+    bool preferLocal = true,
+    bool localOnly = false,
   }) : _engaged = autoplay,
        _index = index,
+       _preferLocal = preferLocal,
+       _localOnly = localOnly,
        _epoch = store.profileEpoch {
     final preferences = store.playbackPreferences;
     _speed = preferences.speed;
@@ -139,6 +143,11 @@ class PlaybackSession extends ChangeNotifier {
   final _recovery = PlaybackRecovery();
   final _health = PlaybackHealth();
   final int _epoch;
+  // 下载好的剧集优先读本地文件：既省流量，也让「源站挂了/断网」时下载内容
+  // 仍然能看。localOnly 是「已下载」页点播放时用的，只认本地，缺文件直接
+  // 报错，不会偷偷回落到在线取流。
+  final bool _preferLocal;
+  final bool _localOnly;
   final List<StreamSubscription<dynamic>> _subscriptions = [];
   Timer? _saveTimer;
   Timer? _healthTimer;
@@ -488,6 +497,35 @@ class PlaybackSession extends ChangeNotifier {
     return next;
   }
 
+  /// 先试本地（已下载到本机的分集），没有再回落到在线取流。
+  /// 「已下载」页进来时 _localOnly=true，缺文件就明确报错，不再退回在线，
+  /// 免得用户以为看的是下载好的那一份。
+  Future<PlaybackPlan?> _loadPreferLocal(int preferred) async {
+    try {
+      final local = await repository.localPlayback(
+        detail.drama,
+        detail.episodes[index],
+      );
+      if (local != null && local.local) {
+        return _loader.use(local);
+      }
+    } catch (error) {
+      if (_localOnly) rethrow;
+      DiaryService.add('[Play] 本地文件不可用，回落在在线取流：${_diagnostic(error)}');
+    }
+    if (_localOnly) {
+      throw AppFailure('本地视频不可用，请重新下载或选择在线播放。', code: 'local_media');
+    }
+    return _loader.load(
+      detail.drama,
+      detail.episodes[index],
+      quality: _quality,
+      online: _online,
+      adBlock: _adBlock,
+      route: preferred,
+    );
+  }
+
   Future<void> _configure(Player target, PlaybackPlan plan) async {
     final platform = target.platform;
     if (platform is! NativePlayer) return;
@@ -624,6 +662,8 @@ class PlaybackSession extends ChangeNotifier {
           ? await _loader.fallback(retainedPlan)
           : warmed != null
           ? await _loader.use(warmed)
+          : _preferLocal || _localOnly
+          ? await _loadPreferLocal(preferred)
           : await _loader.load(
               detail.drama,
               detail.episodes[index],

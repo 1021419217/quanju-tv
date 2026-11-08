@@ -108,6 +108,8 @@ func validNativeCategory(source, category string) bool {
 		return validViralCategory(category)
 	case sourceJiuse:
 		return validJiuseCategory(category)
+	case sourceHsex:
+		return validHsexCategory(category)
 	case sourceJinguoDuanju:
 		return validJinguoDuanjuCategory(category)
 	case sourceJinguo:
@@ -163,6 +165,11 @@ func (engine *nativeEngine) nativeCategories(ctx context.Context, source string,
 	case sourceJiuse:
 		// 九色分类是站方导航原样映射，不需要联网取。
 		for _, entry := range jiuseCategoriesForSource() {
+			all = append(all, entry)
+		}
+		return all, nil
+	case sourceHsex:
+		for _, entry := range hsexCategoriesForSource() {
 			all = append(all, entry)
 		}
 		return all, nil

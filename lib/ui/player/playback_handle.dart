@@ -21,6 +21,8 @@ class PlaybackHandle {
     required int index,
     double position = 0,
     bool autoplay = true,
+    bool preferLocal = true,
+    bool localOnly = false,
   }) {
     final main = _player();
     final standby = _player();
@@ -35,6 +37,8 @@ class PlaybackHandle {
       index: index,
       position: position,
       autoplay: autoplay,
+      preferLocal: preferLocal,
+      localOnly: localOnly,
     );
   }
 
