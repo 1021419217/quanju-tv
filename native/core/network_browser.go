@@ -105,7 +105,11 @@ var browserFingerprintSuffixes = []string{"91p52.com"}
 //
 // 主站自身（91porn.com / 91porny.com 的 HTML 页面）不在此列——它们用标准传输
 // 就能出页面，换指纹反而可能触发验证页。
-var browserFingerprintReferers = []string{"91porn.com", "91porny.com"}
+// 91porn 主站不在这个列表里。2026-11-09 用 curl（标准 TLS，非浏览器指纹）
+// 请求 la.btc620.com 的直链，带 Referer 拿到 206；而 tls-client 的 HTTP/2
+// 对同一个 CDN 会吃 PROTOCOL_ERROR。所以 91 的媒体请求交给标准客户端，
+// 和浏览器外那条能跑通的链路保持一致；旧域名 *.91p52.com 仍按后缀走指纹。
+var browserFingerprintReferers = []string{"91porny.com"}
 
 func browserFingerprintReferer(request *http.Request) bool {
 	if request == nil || request.URL == nil {
