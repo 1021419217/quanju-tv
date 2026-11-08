@@ -526,14 +526,13 @@ class PlaybackSession extends ChangeNotifier {
       // 在线播放再兜一层：站方 CDN 掐断长连接时，ffmpeg 自己按 Range 重连，
       // 播放器不用把整条流交回给上层去做「自动恢复」。中转那边也有续传，
       // 两层都开着才能覆盖「中转先断」和「播放器先断」两种情况。
+      //
+      // 这里只能放「纯数值」选项：mpv 的 stream-lavf-o 是按逗号切分的
+      // key=value 列表，像 reconnect_on_http_error=403,404 这种值里带逗号的
+      // 选项会被切成两段，整组参数都可能失效。
       await platform.setProperty(
         'stream-lavf-o',
-        [
-          'reconnect=1',
-          'reconnect_streamed=1',
-          'reconnect_on_http_error=403,404,500,502,503',
-          'reconnect_delay_max=5',
-        ].join(','),
+        ['reconnect=1', 'reconnect_streamed=1', 'reconnect_delay_max=5'].join(','),
       );
     }
   }
