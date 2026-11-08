@@ -1,4 +1,4 @@
-name: Probe jiuse card
+name: Probe jiuse vip
 
 on:
   workflow_dispatch:
@@ -11,54 +11,56 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - name: 对比可播/不可播卡片标记与备用线路
+      - name: 统计 vip-layer 比例并验证对应关系
         run: |
           set +e
           UA="Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
           SITE=https://91porny.com
-          DEAD=7dff460579f327b234a2
-          LIVE=2c36f7c0bce38d9e1ce9
 
-          curl -sSL -m 30 -A "$UA" "$SITE/video/index" -o /tmp/home.html -w "home http=%{http_code} bytes=%{size_download}\n"
-          curl -sSL -m 30 -A "$UA" "$SITE/search?keywords=%E8%87%AA%E6%8B%8D" -o /tmp/search.html -w "search http=%{http_code} bytes=%{size_download}\n"
-          curl -sSL -m 30 -A "$UA" "$SITE/video/category/most-favorite" -o /tmp/fav.html -w "fav http=%{http_code} bytes=%{size_download}\n"
+          stat() { # $1 名称 $2 URL
+            curl -sSL -m 30 -A "$UA" "$2" -o /tmp/l.html -w "$1 http=%{http_code} bytes=%{size_download} " 
+            CARDS=$(grep -c 'class="colVideoList"' /tmp/l.html)
+            VIP=$(grep -c 'class="vip-layer"' /tmp/l.html)
+            echo "cards=$CARDS vip=$VIP"
+            grep -oE 'href="/video/view/[0-9a-f]{20,24}"' /tmp/l.html | sed -E 's#.*view/([0-9a-f]+).*#\1#' | awk '!s[$0]++' > /tmp/k_$1.txt
+          }
 
-          echo "===== 卡片 HTML 对比"
-          python3 - "$DEAD" "$LIVE" <<'PY'
-          import re,sys
-          dead,live=sys.argv[1],sys.argv[2]
-          for name,path in [("首页/死链",'/tmp/home.html'),("搜索/活链",'/tmp/search.html'),("收藏最多/活链",'/tmp/fav.html')]:
-              s=open(path,encoding='utf-8',errors='ignore').read()
-              for tag,key in [("死",dead),("活",live)]:
-                  i=s.find(key)
-                  if i<0:
-                      print(f"--- {name} {tag} {key}: 未出现")
-                      continue
-                  start=max(0,i-700); end=min(len(s),i+400)
-                  block=s[start:end]
-                  block=re.sub(r'\s+',' ',block)
-                  print(f"--- {name} {tag} {key}")
-                  print(block[:1100])
-                  print()
+          for P in 1 2 3 4 5 8 12 20; do stat "index$P" "$SITE/video/index?page=$P"; done
+          stat fav  "$SITE/video/category/most-favorite"
+          stat long "$SITE/video/category/long-list"
+          stat hot  "$SITE/video/category/hot-list"
+          stat sear "$SITE/search?keywords=%E8%87%AA%E6%8B%8D"
+
+          echo "===== 逐页核对前 6 张卡：是否有 vip-layer 与能否播"
+          python3 - <<'PY'
+          import re,glob,os
+          # 只输出页内卡片顺序 + 该卡是否含 vip-layer，供人工与播放结果对齐
+          for f in ["/tmp/l.html"]:
+              pass
           PY
 
-          echo "===== 死链试备用线路"
-          for Q in "" "?server=line1" "?server=line2" "?server=line3"; do
-            echo "-- view$Q"
-            curl -sSL -m 25 -A "$UA" -e "$SITE/" "$SITE/video/view/$DEAD$Q" -o /tmp/dd.html -w "   http=%{http_code} bytes=%{size_download}\n"
-            SRC=$(grep -oE 'data-src="[^"]+\.m3u8[^"]*"' /tmp/dd.html | head -1 | sed 's/data-src="//;s/"$//')
-            echo "   src=$SRC"
-            [ -n "$SRC" ] && curl -sS -m 20 -A "$UA" -e "$SITE/video/view/$DEAD" -D /tmp/h2.txt -o /tmp/m2.txt "$SRC" && echo "   notice=$(grep -i '^x-video-notice' /tmp/h2.txt | tr -d '\r') segs=$(grep -c '\.ts' /tmp/m2.txt)"
-          done
+          verify() { # $1 页面URL  $2 说明
+            curl -sSL -m 30 -A "$UA" "$1" -o /tmp/v.html
+            echo "##### $2"
+            python3 - "$SITE" <<'PY' > /tmp/pairs.txt
+          import re,sys
+          s=open('/tmp/v.html',encoding='utf-8',errors='ignore').read()
+          blocks=s.split('class="colVideoList"')[1:]
+          for b in blocks[:8]:
+              m=re.search(r'href="/video/view/([0-9a-f]{20,24})"',b)
+              if not m: continue
+              print(m.group(1), 'VIP' if 'vip-layer' in b else 'FREE')
+          PY
+            while read -r K T; do
+              curl -sSL -m 20 -A "$UA" -e "$SITE/" "$SITE/video/view/$K" -o /tmp/vd.html
+              SRC=$(grep -oE 'data-src="[^"]+\.m3u8[^"]*"' /tmp/vd.html | head -1 | sed 's/data-src="//;s/"$//')
+              if [ -z "$SRC" ]; then echo "  $K $T no-src"; continue; fi
+              curl -sS -m 15 -A "$UA" -e "$SITE/video/view/$K" -D /tmp/vh.txt -o /tmp/vm.txt "$SRC"
+              N=$(grep -i '^x-video-notice-code' /tmp/vh.txt | tr -d '\r' | sed 's/^[^:]*: *//')
+              echo "  $K $T notice=${N:-ok} segs=$(grep -c '\.ts' /tmp/vm.txt)"
+            done < /tmp/pairs.txt
+          }
 
-          echo "-- viewhd"
-          curl -sSL -m 25 -A "$UA" -e "$SITE/" "$SITE/video/viewhd/$DEAD" -o /tmp/dh.html -w "   http=%{http_code} bytes=%{size_download}\n"
-          grep -oE 'data-src="[^"]{0,200}"|<source[^>]{0,200}>|https?://[^"'"'"' ]{10,160}\.m3u8[^"'"'"' ]{0,60}' /tmp/dh.html | head -4
-
-          echo "===== 活链详情页关键差异"
-          curl -sSL -m 25 -A "$UA" -e "$SITE/" "$SITE/video/view/$LIVE" -o /tmp/dl.html
-          echo "dead bytes=$(wc -c < /tmp/dd.html) live bytes=$(wc -c < /tmp/dl.html)"
-          echo "--- dead 页面里 vip/pay 相关 class"
-          grep -oE 'class="[^"]{0,60}(vip|Vip|VIP|pay|lock)[^"]{0,40}"' /tmp/dd.html | sort -u | head -8
-          echo "--- live 页面里 vip/pay 相关 class"
-          grep -oE 'class="[^"]{0,60}(vip|Vip|VIP|pay|lock)[^"]{0,40}"' /tmp/dl.html | sort -u | head -8
+          verify "$SITE/video/index?page=1" "首页第1页"
+          verify "$SITE/video/index?page=12" "首页第12页"
+          verify "$SITE/video/category/most-favorite" "收藏最多"
