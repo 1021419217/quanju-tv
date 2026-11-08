@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -432,3 +433,108 @@ func xchinaPlaylist(row map[string]any) string {
 	}
 	return ""
 }
+
+// ---- XChina 实时上新源（sourceXChinaLive）----
+//
+// 与 xchina 共用同一套加密请求、解密与播放链路，差异只有两点：
+// 1. 目录固定打 /sevenVideos?type=recent（站方按上传时间倒序的实时流），
+//    不看用户选的分类；
+// 2. 剧集 ID 前缀换成 xchina-live，卡片副标题显示站方给的相对时间（如「38分钟前」），
+//    方便刷新后一眼判断有没有上新内容。
+
+// xchinaCreatedAt 取条目的上传时间（秒或毫秒时间戳），取不到返回 0。
+func xchinaCreatedAt(row map[string]any) int64 {
+	raw := strings.TrimSpace(mapString(row, "createdTime"))
+	if raw == "" || raw == "<nil>" {
+		return 0
+	}
+	value, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return 0
+	}
+	if value > 1e12 {
+		// 毫秒时间戳统一降到秒，便于和秒级数据比较。
+		return value / 1000
+	}
+	return value
+}
+
+// xchinaLiveDrama 把实时流的一行转成独立源的剧集条目。
+func xchinaLiveDrama(row map[string]any, client *xchinaClient) Drama {
+	drama := xchinaDrama(row, client)
+	if drama.SourceID == "" {
+		return Drama{}
+	}
+	drama.ID = providerDramaID(sourceXChinaLive, drama.SourceID)
+	drama.Source = sourceXChinaLive
+	drama.ChannelName = "XChina 实时"
+	// 卡片第二行渲染的是 category（回落到 typeName），这里放相对时间，
+	// 让「刷新有没有上新」直接可见；原始类型挪到 tags 里保留。
+	if relative := strings.TrimSpace(mapString(row, "time")); relative != "" {
+		drama.TypeName = relative
+		drama.OnlineDate = relative
+	}
+	if kind := strings.TrimSpace(mapString(row, "videoType")); kind != "" {
+		drama.Tags = append(drama.Tags, kind)
+	}
+	return drama
+}
+
+func (d *Downloader) fetchXChinaLiveCatalogPage(ctx context.Context, page int) ([]Drama, bool, error) {
+	if page < 1 {
+		page = 1
+	}
+	client := d.xchina()
+	decoded, err := client.call(ctx, d, "/sevenVideos?page="+strconv.Itoa(page)+"&type=recent", nil)
+	if err != nil {
+		return nil, false, err
+	}
+	rows := xchinaRows(decoded)
+	// 站方本身已按时间倒序返回；再按 createdTime 稳定降序一次，
+	// 避免偶发乱序让「第一条不是最新」。
+	sort.SliceStable(rows, func(i, j int) bool {
+		return xchinaCreatedAt(rows[i]) > xchinaCreatedAt(rows[j])
+	})
+	items := make([]Drama, 0, len(rows))
+	for _, row := range rows {
+		if drama := xchinaLiveDrama(row, client); drama.ID != "" {
+			items = append(items, drama)
+		}
+	}
+	return items, len(items) > 0, nil
+}
+
+func (d *Downloader) fetchXChinaLiveDetail(ctx context.Context, sourceID string) (Drama, []Chapter, error) {
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" || strings.ContainsAny(sourceID, "/?#") {
+		return Drama{}, nil, errors.New("XChina 剧集 ID 无效")
+	}
+	client := d.xchina()
+	decoded, err := client.call(ctx, d, "/sevenVideos/"+url.PathEscape(sourceID), map[string]any{"url_search": ""})
+	if err != nil {
+		if cached := client.cachedDetail(sourceID); cached != nil {
+			decoded = cached
+		} else {
+			return Drama{}, nil, err
+		}
+	}
+	row, ok := decoded.(map[string]any)
+	if !ok || strings.TrimSpace(mapString(row, "id")) == "" {
+		return Drama{}, nil, errors.New("XChina 未返回该视频资料")
+	}
+	client.rememberDetail(sourceID, row)
+	drama := xchinaLiveDrama(row, client)
+	if drama.ID == "" {
+		return Drama{}, nil, errors.New("XChina 视频资料无效")
+	}
+	chapters := []Chapter{{
+		ID:     providerChapterID(sourceXChinaLive, sourceID, "main"),
+		Source: sourceXChinaLive,
+		Title:  "正片",
+		// 复用 xchina 的播放标记：取流分派看 chapter.Source，标记里只需要视频 ID。
+		VideoURL:       xchinaVideoMark + sourceID,
+		CurrentEpisode: rawEpisode(1),
+	}}
+	return drama, chapters, nil
+}
+

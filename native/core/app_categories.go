@@ -92,6 +92,9 @@ func validNativeCategory(source, category string) bool {
 		return validA123Category(category)
 	case sourceXChina:
 		return validXChinaCategory(category)
+	case sourceXChinaLive:
+		// 实时源只有「全部」，固定走 recent 时间倒序流，不接受其它分类。
+		return false
 	case sourceTheporny:
 		_, ok := validThepornyCategory(category)
 		return ok
@@ -123,6 +126,9 @@ func (engine *nativeEngine) nativeCategories(ctx context.Context, source string,
 	case sourceHuangguoAI:
 		return append(all, nativeAICategories...), nil
 	case sourceHuangdou:
+		return all, nil
+	case sourceXChinaLive:
+		// 实时源只提供「全部」一个入口，目录固定按上传时间倒序。
 		return all, nil
 	}
 	if isCustomMaccmsSource(source) {

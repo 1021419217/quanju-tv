@@ -152,7 +152,11 @@ class LocalStore extends ChangeNotifier {
   List<CustomSourceSite> get customSources => List.unmodifiable(_customSources);
 
   bool sourceEnabled(String source) =>
-      _sourceSwitches[source] ?? !SourceSite.isRestricted(source);
+      _sourceSwitches[source] ??
+      // XChina·实时虽然排在受限源分组（列表下方），但默认开启，
+      // 方便直接看刷新效果；用户关掉后按自己的开关走。
+      (!SourceSite.isRestricted(source) ||
+          source == SourceSite.xchinaLive.id);
 
   /// 内置源是否已被彻底删除。
   bool isSourceDeleted(String source) => _deletedSources.contains(source);

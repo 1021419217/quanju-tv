@@ -196,9 +196,17 @@ func (engine *nativeEngine) saveCatalogCache(source string, result *nativeCatalo
 	previous := engine.catalogs[source]
 	state := engine.catalogStates[source]
 	var items []nativeDrama
+	// 实时上新源（xchina-live）每页都是站方按时间倒序切出来的最新内容：
+	// 第一页必须整体替换，不能再把旧条目追加到尾部，否则界面看起来
+	// 「刷新后还是那几样」。其它源保持原有累积合并逻辑不变。
+	replaceHead := source == sourceXChinaLive || strings.HasPrefix(source, sourceXChinaLive+"|")
 	if result.Page == 1 {
 		items = result.Items
-		if len(previous) > 0 {
+		if replaceHead {
+			result.Items = items
+			result.Page = 1
+			result.HasMore = len(items) > 0
+		} else if len(previous) > 0 {
 			old := make(map[string]nativeDrama, len(previous))
 			for _, item := range previous {
 				old[item.ID] = item

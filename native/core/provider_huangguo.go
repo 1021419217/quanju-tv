@@ -36,7 +36,12 @@ const (
 	sourceIkanbot       = "ikanbot"
 	// sourceFanqie 番茄：目录/搜索/详情/取流转发给本机番茄内容引擎（127.0.0.1:18921）。
 	sourceFanqie       = "fanqie"
-	sourceXChina       = "xchina"
+	sourceXChina = "xchina"
+	// sourceXChinaLive 是 XChina 的「实时上新」独立源：与 xchina 共用同一套
+	// 请求/解密/播放链路，但目录固定走 /sevenVideos?type=recent（站方时间倒序
+	// 流），刷新时第一页整体替换、不保留旧条目，用来验证「刷新能否看到新内容」。
+	// 单独用一份 source 标识，避免影响现有 xchina 源的缓存与排序行为。
+	sourceXChinaLive   = "xchina-live"
 	sourceTheporny     = "theporny"
 	sourceJinguoDuanju = "jinguoduanju"
 	sourceJinguo       = "jinguo"
@@ -121,7 +126,7 @@ func splitProviderDramaID(id string) (source, sourceID string, ok bool) {
 
 func isHuangguoProviderSource(source string) bool {
 	switch canonicalProviderSource(source) {
-	case sourceHuangguoAI, sourceHuangguoVideo, sourceHuangdou, sourceHongguo, sourceHuangju, sourceYeguo, sourceJinguoDuanju, sourceJinguo, sourceHeitao, sourceDSD, sourceCloudFront, sourceSorani, sourceGuipian, sourceHanxiaoquan, sourceIkanbot, sourceA123, sourceFanqie, sourceXChina, sourceTheporny:
+	case sourceHuangguoAI, sourceHuangguoVideo, sourceHuangdou, sourceHongguo, sourceHuangju, sourceYeguo, sourceJinguoDuanju, sourceJinguo, sourceHeitao, sourceDSD, sourceCloudFront, sourceSorani, sourceGuipian, sourceHanxiaoquan, sourceIkanbot, sourceA123, sourceFanqie, sourceXChina, sourceXChinaLive, sourceTheporny:
 		return true
 	}
 	return isDuanjuProviderSource(source) || isSekuSource(source)
@@ -301,6 +306,9 @@ func (d *Downloader) GetHuangguoChapters(ctx context.Context, source, sourceID s
 		return drama.DisplayTitle(), chapters, err
 	case sourceXChina:
 		drama, chapters, err := d.fetchXChinaDetail(ctx, sourceID)
+		return drama.DisplayTitle(), chapters, err
+	case sourceXChinaLive:
+		drama, chapters, err := d.fetchXChinaLiveDetail(ctx, sourceID)
 		return drama.DisplayTitle(), chapters, err
 	case sourceTheporny:
 		drama, chapters, err := d.fetchThepornyDetail(ctx, sourceID)

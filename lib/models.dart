@@ -29,6 +29,7 @@ class SourceSite {
       id == 'ikanbot' ||
       id == 'a123' ||
       id == 'xchina' ||
+      id == 'xchina-live' ||
       id == 'theporny' ||
       id == 'jinguoduanju' ||
       id == 'jinguo' ||
@@ -69,6 +70,14 @@ class SourceSite {
   static const jinguoduanju = SourceSite('jinguoduanju', '禁果短剧', '推荐 · 分类短剧 · 在线搜索');
   static const jinguo = SourceSite('jinguo', '禁果', '精选 · 最新 · 分类短剧 · 在线搜索');
   static const heitao = SourceSite('heitao', '黑桃', '分类短剧 · 在线搜索');
+
+  /// XChina 实时上新：与 XChina 同一个站，但目录固定走站方按上传时间倒序的
+  /// 实时流，刷新时整体替换第一页，用来验证能不能刷出新内容。
+  static const xchinaLive = SourceSite(
+    'xchina-live',
+    'XChina·实时',
+    '最新上传 · 按时间倒序',
+  );
 
   /// 短剧家族内置源（全剧视界可用），与 Go 侧 duanjuProviderCatalog 对齐。
   static const duanjuValues = [
@@ -211,6 +220,8 @@ class SourceSite {
     SourceSite('huangguoai', '黄果 AI', 'AI 短剧'),
     SourceSite('cloudfront', '黄果旧版', '旧 API 剧库'),
     ...videoValues,
+    // XChina 实时上新：固定按上传时间倒序，刷新整体替换第一页，用来验证上新。
+    xchinaLive,
   ];
   static const knownValues = [...primaryValues, ...restrictedValues];
   static const allValues = [...primaryValues, ...restrictedValues];
