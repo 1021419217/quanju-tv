@@ -102,6 +102,10 @@ func validNativeCategory(source, category string) bool {
 		return ok
 	case sourceBeabox:
 		return validBeaboxCategory(category)
+	case sourceKissav:
+		return validKissavCategory(category)
+	case sourceViral:
+		return validViralCategory(category)
 	case sourceJinguoDuanju:
 		return validJinguoDuanjuCategory(category)
 	case sourceJinguo:
@@ -141,6 +145,17 @@ func (engine *nativeEngine) nativeCategories(ctx context.Context, source string,
 		// 「全部」= 站方「最近更新」（rf），其余是站方导航分类原样。
 		for _, entry := range p91CategoryEntries {
 			all = append(all, nativeCategory{ID: entry.ID, Name: entry.Name})
+		}
+		return all, nil
+	case sourceKissav:
+		// KISSAV 分类是内置映射（站方路径稳定），不需要联网取。
+		for _, entry := range kissavCategoriesForSource() {
+			all = append(all, entry)
+		}
+		return all, nil
+	case sourceViral:
+		for _, entry := range viralCategoriesForSource() {
+			all = append(all, entry)
 		}
 		return all, nil
 	}

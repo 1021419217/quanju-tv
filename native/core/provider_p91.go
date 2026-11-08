@@ -406,18 +406,34 @@ func (d *Downloader) searchP91(ctx context.Context, query string, page int) ([]D
 }
 
 func parseP91Cards(pageText, category string) []Drama {
-	cards := make([]string, 0, 24)
 	blocks := p91CardBlocks(pageText)
+	if len(blocks) == 0 {
+		// 作者主页 / 搜索页有时不带 videos-text-align，只有 .well 卡片。
+		// 只收「一块里只有一个 viewkey」的 well，避免把裹着全部卡片的外层容器
+		// 当成一张卡片（那样整页只会剩一条）。
+		blocks = p91CardBlocksWith(pageText, "well", true)
+	}
+	// 整列内容都包在 col-lg-8 里的页面（作者主页、详情页侧栏）不能把整列当混淆容器：
+	// 列表页的混淆卡片只是零星几张，不可能所有卡片的祖先都带同一个 col-lg-8。
+	// 早期一律按祖先丢 col-lg-8，直接把作者主页丢成了空列表。
+	layoutColumn := len(blocks) > 0
 	for _, block := range blocks {
-		if p91DecoyCard(block.ancestor) {
+		if !strings.Contains(strings.ToLower(block.ancestor), "col-lg-8") {
+			layoutColumn = false
+			break
+		}
+	}
+	cards := make([]string, 0, len(blocks))
+	for _, block := range blocks {
+		if !layoutColumn && p91DecoyCard(block.ancestor) {
 			continue
 		}
 		cards = append(cards, block.html)
 	}
-	if len(cards) == 0 && len(blocks) == 0 {
+	if len(cards) == 0 && (len(blocks) == 0 || layoutColumn) {
 		// 兜底：站方偶尔调 class，主路径整页不命中时按 viewkey 位置开窗，
-		// 保证列表不会直接空白。只在主路径完全没切出卡片时启用，
-		// 避免把刚刚过滤掉的混淆卡片又捡回来。
+		// 保证列表不会直接空白。只有「整页没切出卡片」或「切出来的全是内容列」
+		// 时启用，避免把刚刚过滤掉的混淆卡片又捡回来。
 		cards = p91FallbackWindows(pageText)
 	}
 	items := make([]Drama, 0, len(cards))
@@ -481,6 +497,12 @@ type p91DivFrame struct {
 // p91CardBlocks 用 div 配对把页面切成一张张真实卡片。
 // 正则跨卡片配对会把「A 的标题」配到「B 的链接」上，是按图点开却播放别的内容的根因之一。
 func p91CardBlocks(pageText string) []p91CardBlock {
+	return p91CardBlocksWith(pageText, "videos-text-align", false)
+}
+
+// p91CardBlocksWith 按 div 配对切卡片。singleViewkey 为 true 时只保留
+// 「整块里只有一个 viewkey」的 div —— 用来兜底 .well 布局时不把外层容器当卡片。
+func p91CardBlocksWith(pageText, marker string, singleViewkey bool) []p91CardBlock {
 	blocks := make([]p91CardBlock, 0, 24)
 	stack := make([]p91DivFrame, 0, 32)
 	for _, loc := range p91DivTokenRE.FindAllStringIndex(pageText, -1) {
@@ -498,7 +520,11 @@ func p91CardBlocks(pageText string) []p91CardBlock {
 			for _, parent := range stack {
 				ancestor = append(ancestor, parent.classes)
 			}
-			blocks = append(blocks, p91CardBlock{html: pageText[frame.start:loc[1]], ancestor: strings.Join(ancestor, " ")})
+			html := pageText[frame.start:loc[1]]
+			if singleViewkey && len(p91ViewkeysIn(html)) > 1 {
+				continue
+			}
+			blocks = append(blocks, p91CardBlock{html: html, ancestor: strings.Join(ancestor, " ")})
 			continue
 		}
 		classes := ""
@@ -506,12 +532,27 @@ func p91CardBlocks(pageText string) []p91CardBlock {
 			classes = strings.ToLower(strings.TrimSpace(m[1]))
 		}
 		stack = append(stack, p91DivFrame{
-			card:    strings.Contains(classes, "videos-text-align"),
+			card:    strings.Contains(classes, marker),
 			classes: classes,
 			start:   loc[0],
 		})
 	}
 	return blocks
+}
+
+// p91ViewkeysIn 取一段 HTML 里出现过的 viewkey（去重）。
+func p91ViewkeysIn(text string) []string {
+	matches := p91ViewkeyRE.FindAllStringSubmatch(text, -1)
+	seen := make(map[string]bool, len(matches))
+	keys := make([]string, 0, len(matches))
+	for _, match := range matches {
+		if len(match) < 2 || seen[match[1]] {
+			continue
+		}
+		seen[match[1]] = true
+		keys = append(keys, match[1])
+	}
+	return keys
 }
 
 // p91DecoyCard 判断卡片是否属于站方插入的混淆/广告容器。
@@ -971,10 +1012,19 @@ func p91BlockedMediaHost(address string) bool {
 
 // ---- 取流 ----
 
-// p91ProbeLimit 是单次取流最多探测几条候选：详情页通常只给 1~2 条真地址，
-// 多条时按可靠性顺序试前面几条即可，避免把打开播放拖慢。
-const p91ProbeLimit = 4
-
+// 91porn 的取流原则：**不做起播前探测**。
+//
+// 笔盒之所以秒播，是因为它一次接口调用拿到直链就直接交给播放器，一个多余请求都不发。
+// 这里从 3.16 起改成了「先探测再播放」：每轮最多 4 条候选、单条 7 秒、整轮 12 秒，
+// 一轮不通还要回源重取、换 ev.php、换游客身份再各探一轮。结果是：
+//   - 点开一部片先干等十几到几十秒（用户看到的就是「缓冲时间变长、一直转圈」）；
+//   - 一次起播给站方 CDN 打十几次请求，游客配额和限流很快被打满，
+//     于是「刚才能播的这会儿也播不了」——越用越差；
+//   - 探测本身超时（7 秒拿不到首包）又会把本来能播的地址判成死链。
+//
+// 现在改成和笔盒一样：详情页已经带出地址就直接返回，**零次额外请求**；
+// 只有详情页没带出地址时才回源一次。地址到底通不通交给本地中转判断 ——
+// 它本来就会在连不上 / 4xx / 断流时自动换备用直链，再让站源重新解析一条。
 func (d *Downloader) resolveP91Media(ctx context.Context, task Task) (providerMedia, error) {
 	candidates := make([]string, 0, 4)
 	if address := strings.TrimSpace(task.Chapter.VideoURL); p91PlayableMediaURL(address) {
@@ -997,25 +1047,22 @@ func (d *Downloader) resolveP91Media(ctx context.Context, task Task) (providerMe
 	}
 	pageURL := p91SiteURL + "/view_video.php?viewkey=" + url.QueryEscape(sourceID)
 
-	// 详情页带出来的地址也可能失效（签名过期 / 站方换节点），先探测；不通就回源重取。
-	var lastProbeErr error
-	if media, err := d.p91PickMedia(ctx, candidates, pageURL); err == nil {
-		return media, nil
-	} else {
-		lastProbeErr = err
+	// 详情页已经解析出地址：直接起播，和笔盒一样不再多发一个请求。
+	if len(candidates) > 0 {
+		return d.p91MediaFromCandidates(candidates, pageURL), nil
 	}
 
-	pageText, pageErr := d.p91Get(ctx, pageURL)
+	var lastErr error
 	blocked := 0
-	if pageErr == nil {
+	// 详情页没给地址（签名过期 / 当初解析失败）：回源取一次。
+	if pageText, err := d.p91Get(ctx, pageURL); err == nil {
 		fresh, blockedCount := p91MediaCandidates(pageText, pageURL)
 		blocked += blockedCount
-		candidates = append(candidates, fresh...)
-		if media, err := d.p91PickMedia(ctx, candidates, pageURL); err == nil {
-			return media, nil
-		} else {
-			lastProbeErr = err
+		if len(fresh) > 0 {
+			return d.p91MediaFromCandidates(fresh, pageURL), nil
 		}
+	} else {
+		lastErr = err
 	}
 
 	// ev.php?VID=<viewkey> 是站方「按视频取播放器」的入口：返回内容只对应这一部片，
@@ -1024,77 +1071,59 @@ func (d *Downloader) resolveP91Media(ctx context.Context, task Task) (providerMe
 	if evText, evErr := d.p91Get(ctx, evAddress); evErr == nil {
 		fresh, evBlocked := p91MediaCandidates(evText, evAddress)
 		blocked += evBlocked
-		candidates = append(candidates, fresh...)
-		if media, err := d.p91PickMedia(ctx, candidates, pageURL); err == nil {
-			return media, nil
-		} else {
-			lastProbeErr = err
+		if len(fresh) > 0 {
+			return d.p91MediaFromCandidates(fresh, pageURL), nil
 		}
+	} else {
+		lastErr = evErr
 	}
 
-	// 还是不通就换一套游客身份（同一游客站方会缓存/限流），把详情页整页重取一次。
+	// 还是没地址就换一套游客身份再要一次（同一游客站方会缓存同一份渲染结果）。
+	// 只有在「确实取不到地址」时才会走到这里，不会拖慢正常起播。
 	p91ResetGuest()
 	if retryText, retryErr := d.p91Get(ctx, pageURL); retryErr == nil {
 		fresh, _ := p91MediaCandidates(retryText, pageURL)
-		candidates = append(candidates, fresh...)
-		if media, err := d.p91PickMedia(ctx, candidates, pageURL); err == nil {
-			return media, nil
-		} else {
-			lastProbeErr = err
+		if len(fresh) > 0 {
+			return d.p91MediaFromCandidates(fresh, pageURL), nil
 		}
+	} else {
+		lastErr = retryErr
 	}
 
-	if len(candidates) == 0 {
-		if blocked > 0 {
-			return providerMedia{}, errors.New("91porn 只返回了广告占位片，请重试")
-		}
-		return providerMedia{}, errors.New("91porn 未返回可播放地址")
+	if blocked > 0 {
+		return providerMedia{}, errors.New("91porn 只返回了广告占位片，请重试")
 	}
-	if lastProbeErr != nil {
-		return providerMedia{}, lastProbeErr
+	if lastErr != nil {
+		return providerMedia{}, fmt.Errorf("91porn 取播放地址失败：%v", lastErr)
 	}
-	return providerMedia{}, errors.New("91porn 播放地址连不上，请重试")
+	return providerMedia{}, errors.New("91porn 未返回可播放地址")
 }
 
-// p91PickMedia 依次探测候选地址，返回第一条真的能出流的，其余作为备用线路
-// （播放器恢复时会自动换线，用户也可以在清晰度/线路里手动换）。
-func (d *Downloader) p91PickMedia(ctx context.Context, candidates []string, pageURL string) (providerMedia, error) {
-	if len(candidates) == 0 {
-		return providerMedia{}, errors.New("91porn 未返回可播放地址")
-	}
-	// 整轮探测给 15 秒上限：站方 CDN 卡住时不能让「点播放」干等半分钟。
-	probeCtx, cancel := context.WithTimeout(ctx, 12*time.Second)
-	defer cancel()
-	var lastErr error
-	probed := 0
+// p91MediaFromCandidates 取第一条候选起播，其余作为备用线路。
+// 不做任何网络探测：把「能不能播」交给本地中转，它会在真正失败时换线/重新解析，
+// 这样正常起播和笔盒一样是一次请求，失败时也照样能自愈。
+func (d *Downloader) p91MediaFromCandidates(candidates []string, pageURL string) providerMedia {
+	unique := make([]string, 0, len(candidates))
 	seen := make(map[string]bool, len(candidates))
-	for index, address := range candidates {
-		if probed >= p91ProbeLimit {
-			break
-		}
-		if seen[address] {
+	for _, address := range candidates {
+		address = strings.TrimSpace(address)
+		if address == "" || seen[address] {
 			continue
 		}
 		seen[address] = true
-		probed++
-		insecure, err := d.p91Probe(probeCtx, address, pageURL)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		media := d.p91MediaFor(address, insecure, pageURL)
-		for _, extra := range candidates[index+1:] {
-			if len(media.Variants) >= 2 {
-				break
-			}
-			media.Variants = append(media.Variants, d.p91MediaFor(extra, false, pageURL))
-		}
-		return media, nil
+		unique = append(unique, address)
 	}
-	if lastErr == nil {
-		lastErr = errors.New("91porn 未返回可播放地址")
+	if len(unique) == 0 {
+		return providerMedia{}
 	}
-	return providerMedia{}, fmt.Errorf("91porn 播放地址连不上（%s），请重试", p91ProbeReason(lastErr))
+	media := d.p91MediaFor(unique[0], false, pageURL)
+	for _, extra := range unique[1:] {
+		if len(media.Variants) >= 3 {
+			break
+		}
+		media.Variants = append(media.Variants, d.p91MediaFor(extra, false, pageURL))
+	}
+	return media
 }
 
 // p91MediaFor 组装播放凭据。Referer 用具体的详情页而不是首页：
@@ -1144,27 +1173,18 @@ func p91ViewkeyOf(pageURL string) string {
 // 再按可用性探测一遍。签名过期的老地址救不回来，只能靠这条新地址接着播。
 func (d *Downloader) p91Reload(ctx context.Context, viewkey string) (string, error) {
 	pageURL := p91SiteURL + "/view_video.php?viewkey=" + url.QueryEscape(viewkey)
+	if pageText, err := d.p91Get(ctx, pageURL); err == nil {
+		if candidates, _ := p91MediaCandidates(pageText, pageURL); len(candidates) > 0 {
+			return candidates[0], nil
+		}
+	}
+	// 详情页这次没给出地址，换一套游客身份再要一次。
+	p91ResetGuest()
 	pageText, err := d.p91Get(ctx, pageURL)
 	if err != nil {
 		return "", err
 	}
 	candidates, _ := p91MediaCandidates(pageText, pageURL)
-	for _, address := range candidates {
-		if _, err := d.p91Probe(ctx, address, pageURL); err == nil {
-			return address, nil
-		}
-	}
-	if len(candidates) > 0 {
-		// 探测都失败也可能只是探测被限流，给第一条让播放器自己试。
-		return candidates[0], nil
-	}
-	// 详情页这次没给出地址，换一套游客身份再要一次。
-	p91ResetGuest()
-	pageText, err = d.p91Get(ctx, pageURL)
-	if err != nil {
-		return "", err
-	}
-	candidates, _ = p91MediaCandidates(pageText, pageURL)
 	if len(candidates) == 0 {
 		return "", errors.New("91porn 重新解析未取到播放地址")
 	}
@@ -1333,9 +1353,15 @@ func (d *Downloader) fetchP91AuthorPage(ctx context.Context, uid string, page in
 		return nil, false, err
 	}
 	items := parseP91Cards(pageText, "")
+	if len(items) == 0 {
+		// 部分作者页只在 basic 视图下输出卡片列表（默认视图是另一套模板）。
+		if alt, altErr := d.p91Get(ctx, address+"&viewtype=basic"); altErr == nil {
+			items = parseP91Cards(alt, "")
+		}
+	}
 	for index := range items {
 		// 作者页里每条作品都属于同一个作者，补上 UID，点进去还能再回来。
 		items[index].AuthorID = uid
 	}
-	return items, len(items) >= 12, nil
+	return items, len(items) >= 8, nil
 }

@@ -32,6 +32,8 @@ class SourceSite {
       id == 'xchina-live' ||
       id == 'p91' ||
       id == 'beabox' ||
+      id == 'kissav' ||
+      id == 'viral' ||
       id == 'theporny' ||
       id == 'jinguoduanju' ||
       id == 'jinguo' ||
@@ -88,6 +90,12 @@ class SourceSite {
   /// 笔盒（BeaBox）：官网 JSON 接口，响应体 AES 加密，域名会自动换，
   /// 由接口里的域名池自我修复，支持分类与关键词搜索。
   static const beabox = SourceSite('beabox', '笔盒', '最新 · 分类 · 在线搜索');
+
+  /// KISSAV：日语 AV 聚合站，播放走站方 m3u8 代理（分片自带签名）。
+  static const kissav = SourceSite('kissav', 'KISSAV', '新作 · 分类 · 在线搜索');
+
+  /// ViralXXX：KVS 站，详情页直接给成品 mp4，CDN 公开支持 Range。
+  static const viral = SourceSite('viral', 'ViralXXX', '最新 · 分类 · 在线搜索');
 
   /// 短剧家族内置源（全剧视界可用），与 Go 侧 duanjuProviderCatalog 对齐。
   static const duanjuValues = [
@@ -234,6 +242,8 @@ class SourceSite {
     xchinaLive,
     p91,
     beabox,
+    kissav,
+    viral,
   ];
   static const knownValues = [...primaryValues, ...restrictedValues];
   static const allValues = [...primaryValues, ...restrictedValues];

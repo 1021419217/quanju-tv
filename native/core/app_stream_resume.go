@@ -26,6 +26,43 @@ const (
 	nativeRelayMaxReloads = 3
 )
 
+// nativeRelayIdleTimeout 是「多久没有新字节就认为这条连接已经僵死」。
+// 站方 CDN 有时既不断开也不发数据，不主动断开就只能一直转圈。10 秒是折中：
+// 短于播放器 20 秒的 network-timeout，长于跨境慢节点的正常首包间隔。
+const nativeRelayIdleTimeout = 10 * time.Second
+
+// nativeIdleReader 给上游响应体加一个空闲看门狗：连续 timeout 没有读到字节就
+// 关掉连接，让阻塞中的 Read 立刻返回错误，交给续传循环重连。
+type nativeIdleReader struct {
+	body    io.ReadCloser
+	timeout time.Duration
+	timer   *time.Timer
+}
+
+func newNativeIdleReader(body io.ReadCloser) *nativeIdleReader {
+	return newNativeIdleReaderWithTimeout(body, nativeRelayIdleTimeout)
+}
+
+func newNativeIdleReaderWithTimeout(body io.ReadCloser, timeout time.Duration) *nativeIdleReader {
+	reader := &nativeIdleReader{body: body, timeout: timeout}
+	reader.timer = time.AfterFunc(reader.timeout, func() { _ = body.Close() })
+	return reader
+}
+
+func (reader *nativeIdleReader) Read(buffer []byte) (int, error) {
+	reader.timer.Reset(reader.timeout)
+	return reader.body.Read(buffer)
+}
+
+func (reader *nativeIdleReader) Close() error {
+	reader.timer.Stop()
+	return reader.body.Close()
+}
+
+func (reader *nativeIdleReader) stop() {
+	reader.timer.Stop()
+}
+
 // nativeRelayBody 把上游媒体流转发给播放器，并在上游掐断时从断点续拉。
 //
 // 91porn 这类站的 CDN 会在几秒到几十秒后主动断开长连接，播放器看到的就是
@@ -45,6 +82,12 @@ func (stream *nativeStreamServer) nativeRelayBody(ctx context.Context, writer ht
 		total = response.ContentLength
 	}
 	written := int64(0)
+	// 已经写给播放器的 Content-Length 是承诺：续传再多也不能超过它，
+	// 否则 Go 的 http 服务会以「wrote more than the declared Content-Length」截断。
+	limit := int64(-1)
+	if response.ContentLength >= 0 {
+		limit = response.ContentLength
+	}
 	resumes := 0
 	failures := 0
 	deadline := time.Now().Add(nativeRelayMaxDuration)
@@ -55,6 +98,9 @@ func (stream *nativeStreamServer) nativeRelayBody(ctx context.Context, writer ht
 	buffer := make([]byte, 32<<10)
 	for {
 		n, readErr := reader.Read(buffer)
+		if n > 0 && limit >= 0 && written+int64(n) > limit {
+			n = max(0, int(limit-written))
+		}
 		if n > 0 {
 			if _, writeErr := writer.Write(buffer[:n]); writeErr != nil {
 				closeCurrent()
@@ -65,6 +111,12 @@ func (stream *nativeStreamServer) nativeRelayBody(ctx context.Context, writer ht
 			if flusher, ok := writer.(http.Flusher); ok {
 				flusher.Flush()
 			}
+		}
+		// 已经写满声明的 Content-Length：上游还可能有数据，但再读下去只会
+		// 被截成 0 字节空转，必须在这里收尾。
+		if limit >= 0 && written >= limit {
+			closeCurrent()
+			return
 		}
 		if readErr == io.EOF {
 			closeCurrent()
@@ -213,11 +265,12 @@ func (stream *nativeStreamServer) nativeResumeFrom(ctx context.Context, upstream
 		closer()
 		return nil, nil, fmt.Errorf("续传不受支持（HTTP 200，需丢弃 %d 字节）", offset)
 	}
+	body := newNativeIdleReader(response.Body)
 	if skip > 0 {
-		if _, err := io.CopyN(io.Discard, response.Body, skip); err != nil {
-			closer()
+		if _, err := io.CopyN(io.Discard, body, skip); err != nil {
+			_ = body.Close()
 			return nil, nil, err
 		}
 	}
-	return bufio.NewReaderSize(response.Body, 64<<10), closer, nil
+	return bufio.NewReaderSize(body, 64<<10), func() { _ = body.Close() }, nil
 }

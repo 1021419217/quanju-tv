@@ -62,7 +62,19 @@ class PlaybackSession extends ChangeNotifier {
       (_) => saveProgress(),
     );
     _healthTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (_closed || !_acceptErrors || _loading || _error != null) return;
+      if (_closed || !_acceptErrors || _error != null) return;
+      if (_loading) {
+        // 20 秒还没起播：中转侧「试旧地址 6s + 重解析 8s」早该有结论了，
+        // 这时还卡着只可能是链路僵死，主动走一次恢复（换线 → 重解析）。
+        final since = _loadingSince;
+        if (since != null &&
+            DateTime.now().difference(since) >=
+                const Duration(seconds: 20)) {
+          _loadingSince = DateTime.now();
+          unawaited(_recover('startup_timeout'));
+        }
+        return;
+      }
       if (_health.stalled(
         position: player.state.position,
         playing: player.state.playing && _playIntent,
@@ -140,6 +152,9 @@ class PlaybackSession extends ChangeNotifier {
   int _generation = 0;
   int _seekSequence = 0;
   bool _loading = true;
+  // 起播看门狗：_loading 为真时健康检查整段跳过，一旦上游卡死，
+  // 播放器就只能干等它自己的超时（用户看到的是「一直转圈最后播不了」）。
+  DateTime? _loadingSince = DateTime.now();
   bool _online = false;
   bool _localFailure = false;
   bool _closed = false;
@@ -443,6 +458,7 @@ class PlaybackSession extends ChangeNotifier {
     } catch (_) {}
     if (!_current(ticket)) return;
     _loading = false;
+    _loadingSince = null;
     _localFailure = current.local;
     var issue = '';
     if (!current.local) {
@@ -557,6 +573,7 @@ class PlaybackSession extends ChangeNotifier {
     _openedAt = position;
     _index = index;
     _loading = true;
+    _loadingSince = DateTime.now();
     _error = null;
     _localFailure = false;
     _loadingMessage = switch (recovery) {

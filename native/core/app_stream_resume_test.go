@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 // 站方 CDN 会在传一段之后直接掐断连接。本地中转必须从断点续拉，
@@ -282,4 +283,29 @@ func TestNativeRelayReloadsAddress(t *testing.T) {
 	if calls == 0 {
 		t.Fatalf("应调用重新解析")
 	}
+}
+
+// CDN 有时既不断开也不发数据（僵死连接）。看门狗必须在超时后关掉上游，
+// 让阻塞中的 Read 立刻返回，交给续传循环重连，而不是让播放器一直转圈。
+func TestNativeIdleReaderClosesStalledBody(t *testing.T) {
+	pr, pw := io.Pipe()
+	reader := newNativeIdleReaderWithTimeout(pr, 60*time.Millisecond)
+	defer reader.stop()
+	done := make(chan error, 1)
+	go func() {
+		buffer := make([]byte, 8)
+		for {
+			if _, err := reader.Read(buffer); err != nil {
+				done <- err
+				return
+			}
+		}
+	}()
+	// 一直不写数据：应该在 60ms 左右被看门狗断开。
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("僵死连接没有被看门狗断开")
+	}
+	_ = pw.Close()
 }

@@ -56,7 +56,7 @@ func nativeSourceSupportsSearch(source string) bool {
 	case sourceHongguo, sourceHuangju, sourceYeguo, sourceDSD, sourceSorani,
 		sourceGuipian, sourceHanxiaoquan, sourceA123, sourceIkanbot, sourceFanqie,
 		sourceXChina, sourceXChinaLive, sourceTheporny, sourceJinguoDuanju, sourceJinguo, sourceHeitao,
-		sourceP91, sourceBeabox:
+		sourceP91, sourceBeabox, sourceKissav, sourceViral:
 		return true
 	}
 	if isDuanjuProviderSource(source) {
@@ -177,6 +177,10 @@ func (engine *nativeEngine) nativeSearchSource(ctx context.Context, source, quer
 		items, more, err = d.fetchHeitaoCatalogPage(ctx, page, "", query)
 	case sourceBeabox:
 		items, more, err = d.fetchBeaboxCatalogPage(ctx, page, "", query)
+	case sourceKissav:
+		items, more, err = d.fetchKissavCatalogPage(ctx, page, "", query)
+	case sourceViral:
+		items, more, err = d.fetchViralCatalogPage(ctx, page, "", query)
 	default:
 		// 短剧家族与自定义 MacCMS 源共用同一套搜索接口（isDuanjuProviderSource 已含自定义源）。
 		items, err = d.searchDuanju(ctx, source, query)

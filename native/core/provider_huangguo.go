@@ -52,6 +52,12 @@ const (
 	// sourceBeabox 是笔盒（BeaBox）：走官网 /api 接口，响应体 AES-CBC 加密，
 	// 站点域名会被墙换，靠 /api 里的 __ENC_DOMAINS 自我发现备选域名。见 provider_beabox.go。
 	sourceBeabox = "beabox"
+	// sourceKissav 是 KISSAV：jable 系模板的服务端渲染站，播放走站方
+	// /media/m3u8 代理（分片各自带签名），见 provider_kissav.go。
+	sourceKissav = "kissav"
+	// sourceViral 是 ViralXXXPorn：KVS 内核，详情页 flashvars 里直接给成品 mp4，
+	// 302 到公开 CDN（支持 Range），见 provider_viral.go。
+	sourceViral = "viral"
 
 	providerMaxBodyBytes = 20 * 1024 * 1024
 	providerTimeout      = 12 * time.Second
@@ -132,7 +138,7 @@ func splitProviderDramaID(id string) (source, sourceID string, ok bool) {
 
 func isHuangguoProviderSource(source string) bool {
 	switch canonicalProviderSource(source) {
-	case sourceHuangguoAI, sourceHuangguoVideo, sourceHuangdou, sourceHongguo, sourceHuangju, sourceYeguo, sourceJinguoDuanju, sourceJinguo, sourceHeitao, sourceDSD, sourceCloudFront, sourceSorani, sourceGuipian, sourceHanxiaoquan, sourceIkanbot, sourceA123, sourceFanqie, sourceXChina, sourceXChinaLive, sourceTheporny, sourceP91, sourceBeabox:
+	case sourceHuangguoAI, sourceHuangguoVideo, sourceHuangdou, sourceHongguo, sourceHuangju, sourceYeguo, sourceJinguoDuanju, sourceJinguo, sourceHeitao, sourceDSD, sourceCloudFront, sourceSorani, sourceGuipian, sourceHanxiaoquan, sourceIkanbot, sourceA123, sourceFanqie, sourceXChina, sourceXChinaLive, sourceTheporny, sourceP91, sourceBeabox, sourceKissav, sourceViral:
 		return true
 	}
 	return isDuanjuProviderSource(source) || isSekuSource(source)
@@ -182,6 +188,10 @@ func canonicalProviderSource(source string) string {
 		return sourceTheporny
 	case "beabox", "beabox.cc", "www.beabox.cc", "beabox.live":
 		return sourceBeabox
+	case "kissav", "kissavs", "kissavs.com", "www.kissavs.com":
+		return sourceKissav
+	case "viral", "viralxxx", "viralxxxporn", "viralxxxporn.com", "www.viralxxxporn.com":
+		return sourceViral
 	default:
 		if canonical, found := duanjuSourceAliases[key]; found {
 			return canonical

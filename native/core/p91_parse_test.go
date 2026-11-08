@@ -1,9 +1,11 @@
 package core
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
+	"time"
 )
 
 const p91ListFixture = `<html><body>
@@ -382,5 +384,77 @@ func TestP91ValidAuthorID(t *testing.T) {
 		if p91ValidAuthorID(uid) {
 			t.Fatalf("应拒绝: %q", uid)
 		}
+	}
+}
+
+// 作者主页的卡片整列都包在 col-lg-8 里（内容主列），不能像列表页那样
+// 把「祖先带 col-lg-8」一律当混淆卡片丢掉 —— 3.19 每个作者页都是空的。
+func TestP91AuthorPageKeepsLayoutColumn(t *testing.T) {
+	page := `<html><body><div class="row">
+<div class="col-xs-12 col-lg-8">
+  <div class="well well-sm videos-text-align">
+    <div class="video-img-box"><a href="/view_video.php?viewkey=aaa111"><img src="https://img/a.jpg"></a></div>
+    <div class="video-info"><span class="video-title">作者作品一</span><span class="info">From:</span>&nbsp;<a href="/uvideos.php?UID=c24dDoGZBAnwUtBbHweSJB">老张</a></div>
+  </div>
+  <div class="well well-sm videos-text-align">
+    <div class="video-img-box"><a href="/view_video.php?viewkey=bbb222"><img src="https://img/b.jpg"></a></div>
+    <div class="video-info"><span class="video-title">作者作品二</span></div>
+  </div>
+</div>
+<div class="col-xs-12 col-lg-4"><div class="well">侧栏广告</div></div>
+</div></body></html>`
+	items := parseP91Cards(page, "")
+	if len(items) != 2 {
+		t.Fatalf("作者页整列被误当混淆卡片: %d 条", len(items))
+	}
+	if items[0].SourceID != "aaa111" || items[0].Title != "作者作品一" {
+		t.Fatalf("第一条错误: %s %q", items[0].SourceID, items[0].Title)
+	}
+	if items[0].AuthorID != "c24dDoGZBAnwUtBbHweSJB" {
+		t.Fatalf("作者 UID 丢了: %q", items[0].AuthorID)
+	}
+}
+
+// 作者页有时不带 videos-text-align，只有 .well 卡片：要能兜底切出来，
+// 且外层裹着全部卡片的 well 容器不能被当成一张卡片。
+func TestP91AuthorPageWellFallback(t *testing.T) {
+	page := `<html><body>
+<div class="well well-sm">
+  <div class="well">
+    <a href="/view_video.php?viewkey=ccc333"><img src="https://img/c.jpg"></a>
+    <span class="video-title">作品 C</span>
+  </div>
+  <div class="well">
+    <a href="/view_video.php?viewkey=ddd444"><img src="https://img/d.jpg"></a>
+    <span class="video-title">作品 D</span>
+  </div>
+</div>
+</body></html>`
+	items := parseP91Cards(page, "")
+	if len(items) != 2 {
+		t.Fatalf("well 兜底失败: %d 条", len(items))
+	}
+	if items[0].SourceID != "ccc333" || items[1].SourceID != "ddd444" {
+		t.Fatalf("卡片顺序错误: %+v", items)
+	}
+}
+
+// 起播不再预探测：详情页已经带出地址时必须零网络请求直接返回。
+func TestP91ResolveReturnsDetailAddressInstantly(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	d := &Downloader{}
+	media, err := d.resolveP91Media(ctx, Task{
+		DramaID: "p91:abc123def456",
+		Chapter: Chapter{VideoURL: "https://ccm.91p52.com/1.mp4?st=x", PageURL: "https://91porn.com/view_video.php?viewkey=abc123def456"},
+	})
+	if err != nil {
+		t.Fatalf("不该因为探测/回源而失败: %v", err)
+	}
+	if media.URL != "https://ccm.91p52.com/1.mp4?st=x" {
+		t.Fatalf("地址错误: %s", media.URL)
+	}
+	if media.credentials == nil || !media.credentials.resilient {
+		t.Fatalf("续传标记丢了")
 	}
 }

@@ -70,6 +70,12 @@ func (d *Downloader) nativeCoverAddress(ctx context.Context, drama nativeDrama) 
 	case sourceBeabox:
 		fresh, _, err := d.fetchBeaboxDetail(ctx, id)
 		return nativeNormalize(fresh).Cover, err
+	case sourceKissav:
+		fresh, _, err := d.fetchKissavDetail(ctx, id)
+		return nativeNormalize(fresh).Cover, err
+	case sourceViral:
+		fresh, _, err := d.fetchViralDetail(ctx, id)
+		return nativeNormalize(fresh).Cover, err
 	case sourceTheporny:
 		fresh, _, err := d.fetchThepornyDetail(ctx, id)
 		return nativeNormalize(fresh).Cover, err

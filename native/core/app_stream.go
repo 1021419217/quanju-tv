@@ -43,7 +43,9 @@ type nativeStreamSession struct {
 	lastUsed     time.Time
 	diagnosticID string
 	adBlock      bool
-	hook         seku.StreamHook
+	// resilient 在打开会话时定死：上游会掐长连接/中途停发，中转要走续传与看门狗。
+	resilient bool
+	hook      seku.StreamHook
 	// fallbacks 是同一部片的备用直链（来自 providerMedia.Variants）。
 	// 主链被 CDN 掐死后按序换，换成功就记住，后续请求都走这条。
 	fallbacks []string
@@ -89,6 +91,25 @@ func (session *nativeStreamSession) promoteAddress(assetKey, address string) {
 	session.assets[assetKey] = asset
 }
 
+// enableInsecureTLS 把整个会话的媒体传输切到「跳过证书校验」并返回新凭据。
+// 只在真的遇到证书错误时调用一次：站方 CDN 缺中间证书，标准校验必失败但流可播。
+func (session *nativeStreamSession) enableInsecureTLS() *providerMediaCredentials {
+	session.mu.Lock()
+	defer session.mu.Unlock()
+	if session.credentials == nil || session.credentials.insecureTLS {
+		return nil
+	}
+	clone := *session.credentials
+	clone.insecureTLS = true
+	session.credentials = &clone
+	return &clone
+}
+
+// nativeCertificateError 判断错误是不是证书校验失败（中转层通用入口）。
+func nativeCertificateError(err error) bool {
+	return p91CertificateError(err)
+}
+
 // reloadAddress 让站源重新解析一条播放地址；没实现 Reload 的源返回空。
 func (session *nativeStreamSession) reloadAddress(ctx context.Context) (string, error) {
 	session.mu.Lock()
@@ -99,7 +120,7 @@ func (session *nativeStreamSession) reloadAddress(ctx context.Context) (string, 
 	}
 	session.reloads++
 	session.mu.Unlock()
-	reloadCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	reloadCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
 	return reload(reloadCtx)
 }
@@ -140,12 +161,24 @@ func (stream *nativeStreamServer) nativeRequest(request *http.Request) (*http.Re
 
 var nativePlaylistURI = regexp.MustCompile(`URI="([^"]+)"`)
 
+// nativeRelayFallbackBudget 是一条地址失败后，在备用直链上最多花多少时间。
+// 每条死线都要等到 12 秒响应头超时，几条串起来就是半分钟的转圈；宁可早点
+// 承认这批地址不可用，把时间留给「重新解析」。
+const nativeRelayFallbackBudget = 6 * time.Second
+
+// nativeUpstreamStatus 表示上游用状态码明确拒绝（403 多半是签名过期）。
+type nativeUpstreamStatus struct{ status int }
+
+func (err *nativeUpstreamStatus) Error() string {
+	return fmt.Sprintf("上游返回 HTTP %d", err.status)
+}
+
 // nativeFetchWithFallback 在主链连不上或被站方拒绝时依次试备用直链，
 // 再让站源重新解析一次（只有实现了 Reload 的源才有这一步）。
 // 只返回真正能用的那条；都不行时返回最后一次错误。
 func (stream *nativeStreamServer) nativeFetchWithFallback(ctx context.Context, request *http.Request, session *nativeStreamSession, address string) (*http.Response, *http.Request, string, error) {
-	attempt := func(target string) (*http.Response, *http.Request, error) {
-		upstream, err := http.NewRequestWithContext(ctx, request.Method, target, nil)
+	attempt := func(attemptCtx context.Context, target string) (*http.Response, *http.Request, error) {
+		upstream, err := http.NewRequestWithContext(attemptCtx, request.Method, target, nil)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -163,20 +196,35 @@ func (stream *nativeStreamServer) nativeFetchWithFallback(ctx context.Context, r
 		if response.StatusCode >= 400 {
 			_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 64<<10))
 			response.Body.Close()
-			return nil, upstream, fmt.Errorf("上游返回 HTTP %d", response.StatusCode)
+			return nil, upstream, &nativeUpstreamStatus{status: response.StatusCode}
 		}
 		return response, upstream, nil
 	}
 	var lastErr error
+	// 备用直链和主链是同一份详情页里一起解析出来的：签名一起过期，也常被
+	// 同一个 CDN 节点一起拒。连续两条明确拒绝就没必要把剩下的都试一遍。
+	denied := 0
+	budget, cancelBudget := context.WithTimeout(ctx, nativeRelayFallbackBudget)
+	defer cancelBudget()
 	for _, candidate := range session.relayCandidates(address) {
-		response, upstream, err := attempt(candidate)
+		response, upstream, err := attempt(budget, candidate)
 		if err == nil {
 			return response, upstream, candidate, nil
 		}
 		lastErr = err
+		if status, ok := err.(*nativeUpstreamStatus); ok && (status.status == http.StatusForbidden || status.status == http.StatusUnauthorized || status.status == http.StatusNotFound) {
+			denied++
+			if denied >= 2 {
+				break
+			}
+		}
+		if budget.Err() != nil {
+			break
+		}
 	}
+	// 重新解析用原始 ctx：上面那点预算是给「试旧地址」的，不能连累这一步。
 	if reissued, err := session.reloadAddress(ctx); err == nil && reissued != "" && reissued != address {
-		response, upstream, retryErr := attempt(reissued)
+		response, upstream, retryErr := attempt(ctx, reissued)
 		if retryErr == nil {
 			return response, upstream, reissued, nil
 		}
@@ -208,6 +256,9 @@ func (stream *nativeStreamServer) nativeOpen(media providerMedia, adBlock bool) 
 	token := hex.EncodeToString(tokenBytes)
 	ctx, cancel := context.WithCancel(providerMediaContext(context.Background(), media.credentials))
 	session := &nativeStreamSession{assets: map[string]nativeStreamAsset{}, referer: media.Referer, key: media.HLSKey, ctx: ctx, cancel: cancel, lastUsed: time.Now(), credentials: media.credentials, diagnosticID: nativeStreamID(token), adBlock: adBlock, hook: media.Hook, reload: media.Reload}
+	if media.credentials != nil {
+		session.resilient = media.credentials.resilient
+	}
 	for _, variant := range media.Variants {
 		if address := strings.TrimSpace(variant.URL); address != "" && address != media.URL {
 			session.fallbacks = append(session.fallbacks, address)
@@ -412,10 +463,11 @@ func (stream *nativeStreamServer) nativeServe(writer http.ResponseWriter, reques
 		return
 	}
 	ctx, cancel := context.WithCancel(providerMediaContext(request.Context(), session.credentials))
-	defer cancel()
+	// 证书链不完整时会把 ctx 换成「宽松传输」的版本，所以 cancel/stop 要用闭包延迟取最新值。
+	defer func() { cancel() }()
 	ctx = context.WithValue(ctx, nativeStreamDiagnosticKey{}, info)
 	stop := context.AfterFunc(session.ctx, cancel)
-	defer stop()
+	defer func() { stop() }()
 	writer.Header().Set("Cache-Control", "no-store")
 	// 播放列表里写回的绝对地址跟着请求来源走：本机播放是 127.0.0.1，投屏时
 	// 电视按内网地址请求，只有用请求 Host 才能让两边都拉到同一份资源。
@@ -469,9 +521,30 @@ func (stream *nativeStreamServer) nativeServe(writer http.ResponseWriter, reques
 		}
 	}
 	response, err := stream.nativeRequest(upstream)
+	// 站方 CDN 证书链不完整（缺中间证书）时标准校验必失败，但流本身可播。
+	// 3.16~3.19 靠起播前探测来发现这件事；现在不探测了，就在真遇到证书错误时
+	// 把整个会话切到宽松传输再试一次 —— 只影响这个会话、只影响这一个源。
+	if err != nil && nativeCertificateError(err) {
+		if credentials := session.enableInsecureTLS(); credentials != nil {
+			stream.nativeLog(info, "tls_fallback", fetchAddress, "证书校验失败，切换宽松传输重试", 0, "")
+			retryCtx, retryCancel := context.WithCancel(providerMediaContext(request.Context(), credentials))
+			retryCtx = context.WithValue(retryCtx, nativeStreamDiagnosticKey{}, info)
+			retryStop := context.AfterFunc(session.ctx, retryCancel)
+			retryRequest := upstream.Clone(retryCtx)
+			if retryResponse, retryErr := stream.nativeRequest(retryRequest); retryErr == nil {
+				cancel()
+				stop()
+				ctx, cancel, stop = retryCtx, retryCancel, retryStop
+				upstream, response, err = retryRequest, retryResponse, nil
+			} else {
+				retryCancel()
+				retryStop()
+			}
+		}
+	}
 	// 主链连不上或是被站方明确拒（403 多半是签名过期），给可续传的源换一次地址：
 	// 备用直链 → 重新解析。其它站源不满足条件，行为与原来完全一致。
-	if (err != nil || response.StatusCode >= 400) && session.credentials != nil && session.credentials.resilient {
+	if (err != nil || response.StatusCode >= 400) && session.resilient {
 		if retry, retryRequest, retryAddress, retryErr := stream.nativeFetchWithFallback(ctx, request, session, fetchAddress); retryErr == nil {
 			if err != nil {
 				err = nil
@@ -502,14 +575,25 @@ func (stream *nativeStreamServer) nativeServe(writer http.ResponseWriter, reques
 	contentIsMP4 := strings.Contains(contentType, "video/mp4")
 	playlist := strings.Contains(contentType, "mpegurl") ||
 		(strings.HasSuffix(strings.ToLower(finalURL.Path), ".m3u8") && !contentIsMP4)
-	reader := bufio.NewReader(response.Body)
-	if request.Method == http.MethodGet {
-		peek, _ := reader.Peek(512)
+	var responseBody io.ReadCloser = response.Body
+	if session.resilient {
+		// CDN 有时不断开、只是不再发数据：十几秒没有新字节就主动断开重连，
+		// 否则播放器会一直转圈到超时（用户看到的「缓冲很久最后播不了」）。
+		watch := newNativeIdleReader(response.Body)
+		defer watch.stop()
+		responseBody = watch
+	}
+	reader := bufio.NewReader(responseBody)
+	// Peek 会一直阻塞到上游吐出首字节。慢节点上这几秒就是纯等待，所以明确是
+	// mp4 直链（Content-Type 或地址后缀）时直接放行，不做 m3u8 嗅探。
+	plainMP4 := contentIsMP4 || strings.HasSuffix(strings.ToLower(finalURL.Path), ".mp4") || strings.HasSuffix(strings.ToLower(finalURL.Path), ".m4v")
+	if request.Method == http.MethodGet && !playlist && !plainMP4 {
+		// 只读 16 字节判断是不是 m3u8：原来 Peek(512) 在慢速首包时会一直等，
+		// 明明已经有数据了却一个字节都不往播放器写。
+		peek, _ := reader.Peek(16)
 		bodyIsPlaylist := strings.HasPrefix(strings.TrimSpace(strings.TrimPrefix(string(peek), "\ufeff")), "#EXTM3U")
 		if bodyIsPlaylist {
 			playlist = true
-		} else if contentIsMP4 {
-			playlist = false
 		}
 	}
 	if playlist && request.Method == http.MethodHead {
@@ -549,7 +633,7 @@ func (stream *nativeStreamServer) nativeServe(writer http.ResponseWriter, reques
 	if request.Method == http.MethodGet {
 		// 标记了 resilient 的源（站方 CDN 会掐长连接）走断点续传中转：
 		// 上游断开时从断点再拉一段，播放器不会看到「传输中断」。
-		if session.credentials != nil && session.credentials.resilient {
+		if session.resilient {
 			stream.nativeRelayBody(ctx, writer, request.Method, upstream, session, parts[1], finalURL.String(), response, reader, info)
 			return
 		}
