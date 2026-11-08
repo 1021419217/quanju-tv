@@ -33,6 +33,47 @@ class DiaryService {
     if (_crashText.isNotEmpty) ..._crashText.split('\n'),
   ]);
 
+  /// 最近一条原生流诊断里的失败原因。
+  ///
+  /// 播放失败时界面只能给一句「自动恢复未成功」，真正的原因（证书校验失败 /
+  /// 连不上 CDN / 403 / 超时）只在原生日志里。把最后一条拿出来贴在错误文案里，
+  /// 用户截图就能定位，不用再让他翻日记。
+  static String? lastStreamIssue() {
+    if (_nativeText.isEmpty) return null;
+    final lines = _nativeText.split('\n');
+    final start = lines.length > 80 ? lines.length - 80 : 0;
+    for (var i = lines.length - 1; i >= start; i--) {
+      final line = lines[i];
+      if (!line.contains('[Stream]')) continue;
+      final error = RegExp(r'error=([a-z_]+)').firstMatch(line)?.group(1);
+      if (error != null && error != 'none') return _streamIssueText(error);
+      final status = RegExp(r'HTTP (\d{3})').firstMatch(line)?.group(1);
+      if (status != null) return '站方 CDN 返回 HTTP $status';
+      if (line.contains('asset_missing')) return '播放会话已过期';
+    }
+    return null;
+  }
+
+  static String _streamIssueText(String code) {
+    switch (code) {
+      case 'tls':
+        return '证书校验失败';
+      case 'dns':
+        return '域名解析失败';
+      case 'connect':
+        return '连不上站方 CDN';
+      case 'timeout':
+      case 'deadline':
+        return '连接超时';
+      case 'unexpected_eof':
+        return '连接被中断';
+      case 'canceled':
+        return '请求被取消';
+      default:
+        return '传输中断';
+    }
+  }
+
   static Future<void> clear() async {
     _entries.clear();
     _nativeText = '';

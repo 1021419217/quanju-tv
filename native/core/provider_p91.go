@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"html"
@@ -107,9 +108,18 @@ var p91AdMediaHosts = []string{"kwai.net", "xhlive.net", "9splt.com", "jads.co",
 // ---- 请求 ----
 
 func (d *Downloader) p91Get(ctx context.Context, rawURL string) (string, error) {
+	return d.p91GetWith(ctx, rawURL, p91Cookie)
+}
+
+// p91GetWith 允许换一份 Cookie 再取一次：站方偶尔给出「有标题没有播放源」的渲染，
+// 换游客标记重新渲染往往就带 source 了。
+func (d *Downloader) p91GetWith(ctx context.Context, rawURL, cookie string) (string, error) {
 	retries := d.cfg.Retries
 	if retries <= 0 {
 		retries = 3
+	}
+	if strings.TrimSpace(cookie) == "" {
+		cookie = p91Cookie
 	}
 	var lastErr error
 	for attempt := 1; attempt <= retries; attempt++ {
@@ -131,7 +141,7 @@ func (d *Downloader) p91Get(ctx context.Context, rawURL string) (string, error) 
 		request.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
 		request.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
 		request.Header.Set("Referer", p91SiteURL+"/")
-		request.Header.Set("Cookie", p91Cookie)
+		request.Header.Set("Cookie", cookie)
 		response, err := d.doPreparedCatalogRequest(request, 20*time.Second, nil)
 		if err != nil {
 			lastErr = err
@@ -395,37 +405,51 @@ func (d *Downloader) fetchP91Detail(ctx context.Context, sourceID string) (Drama
 	return drama, chapters, nil
 }
 
-// p91SourceFromPage 从详情页提取真实播放地址。
-//
-// 依次尝试：脚本里的加密串（多写法）→ 页面直出的 <source>/<video> → 整页 mp4/m3u8 兜底。
+// p91SourceFromPage 从详情页提取第一个候选播放地址（详情页展示用，不做连通性探测）。
 func p91SourceFromPage(pageText, pageURL string) (string, error) {
-	candidates := make([]string, 0, 16)
-	for _, literal := range p91ScriptLiterals(pageText) {
-		candidates = append(candidates, p91CandidatesFromMarkup(p91PercentDecode(literal))...)
+	candidates, blocked := p91MediaCandidates(pageText, pageURL)
+	if len(candidates) > 0 {
+		return candidates[0], nil
 	}
-	candidates = append(candidates, p91CandidatesFromMarkup(pageText)...)
+	if blocked > 0 {
+		return "", errors.New("91porn 只返回了广告占位片，请重试")
+	}
+	return "", errors.New("91porn 未返回可播放地址")
+}
+
+// p91MediaCandidates 返回去重后的全部候选直链（按可靠性排序），第二个返回值是被
+// 广告规则拦掉的条数，用来区分「页面没给地址」和「给了但都是广告」。
+//
+// 顺序：脚本加密串（播放器真正的 source）→ 页面直出 <source>/<video> → 整页 mp4/m3u8 兜底。
+func p91MediaCandidates(pageText, pageURL string) ([]string, int) {
+	raw := make([]string, 0, 16)
+	for _, literal := range p91ScriptLiterals(pageText) {
+		raw = append(raw, p91CandidatesFromMarkup(p91PercentDecode(literal))...)
+	}
+	raw = append(raw, p91CandidatesFromMarkup(pageText)...)
 	for _, match := range p91MediaURLRE.FindAllString(pageText, -1) {
-		candidates = append(candidates, match)
+		raw = append(raw, match)
 	}
 
-	blocked := false
-	for _, raw := range candidates {
-		address := p91NormalizeMediaURL(raw, pageURL)
+	seen := make(map[string]bool, len(raw))
+	candidates := make([]string, 0, len(raw))
+	blocked := 0
+	for _, item := range raw {
+		address := p91NormalizeMediaURL(item, pageURL)
 		if address == "" {
 			continue
 		}
 		if p91BlockedMediaHost(address) {
-			blocked = true
+			blocked++
 			continue
 		}
-		if p91PlayableMediaURL(address) {
-			return address, nil
+		if !p91PlayableMediaURL(address) || seen[address] {
+			continue
 		}
+		seen[address] = true
+		candidates = append(candidates, address)
 	}
-	if blocked {
-		return "", errors.New("91porn 只返回了广告占位片，请重试")
-	}
-	return "", errors.New("91porn 未返回可播放地址")
+	return candidates, blocked
 }
 
 // p91ScriptLiterals 把页面里 strencode2/strencode1/strencode/unescape 调用的
@@ -608,41 +632,244 @@ func p91BlockedMediaHost(address string) bool {
 
 // ---- 取流 ----
 
+// p91ProbeLimit 是单次取流最多探测几条候选：详情页通常只给 1~2 条真地址，
+// 多条时按可靠性顺序试前面几条即可，避免把打开播放拖慢。
+const p91ProbeLimit = 4
+
 func (d *Downloader) resolveP91Media(ctx context.Context, task Task) (providerMedia, error) {
-	address := strings.TrimSpace(task.Chapter.VideoURL)
-	if !p91PlayableMediaURL(address) {
-		sourceID := ""
-		if _, id, ok := splitProviderDramaID(task.DramaID); ok {
-			sourceID = id
-		}
-		if sourceID == "" {
-			sourceID = strings.TrimSpace(task.Chapter.PageURL)
-			if index := strings.Index(sourceID, "viewkey="); index >= 0 {
-				sourceID = sourceID[index+len("viewkey="):]
-				sourceID = strings.TrimSpace(strings.Split(sourceID, "&")[0])
-			}
-		}
-		if sourceID == "" || strings.ContainsAny(sourceID, "/?#& ") {
-			return providerMedia{}, errors.New("91porn 播放请求缺少有效的视频 ID")
-		}
-		pageURL := p91SiteURL + "/view_video.php?viewkey=" + url.QueryEscape(sourceID)
-		pageText, err := d.p91Get(ctx, pageURL)
-		if err != nil {
-			return providerMedia{}, err
-		}
-		fresh, err := p91SourceFromPage(pageText, pageURL)
-		if err != nil {
-			return providerMedia{}, err
-		}
-		address = fresh
+	candidates := make([]string, 0, 4)
+	if address := strings.TrimSpace(task.Chapter.VideoURL); p91PlayableMediaURL(address) {
+		candidates = append(candidates, address)
 	}
+
+	sourceID := ""
+	if _, id, ok := splitProviderDramaID(task.DramaID); ok {
+		sourceID = id
+	}
+	if sourceID == "" {
+		sourceID = strings.TrimSpace(task.Chapter.PageURL)
+		if index := strings.Index(sourceID, "viewkey="); index >= 0 {
+			sourceID = sourceID[index+len("viewkey="):]
+			sourceID = strings.TrimSpace(strings.Split(sourceID, "&")[0])
+		}
+	}
+	if sourceID == "" || strings.ContainsAny(sourceID, "/?#& ") {
+		return providerMedia{}, errors.New("91porn 播放请求缺少有效的视频 ID")
+	}
+	pageURL := p91SiteURL + "/view_video.php?viewkey=" + url.QueryEscape(sourceID)
+
+	// 详情页带出来的地址也可能失效（签名过期 / 站方换节点），先探测；不通就回源重取。
+	if media, err := d.p91PickMedia(ctx, candidates); err == nil {
+		return media, nil
+	}
+
+	pageText, err := d.p91Get(ctx, pageURL)
+	if err != nil {
+		return providerMedia{}, err
+	}
+	fresh, blocked := p91MediaCandidates(pageText, pageURL)
+	candidates = append(candidates, fresh...)
+	media, pickErr := d.p91PickMedia(ctx, candidates)
+	if pickErr == nil {
+		return media, nil
+	}
+
+	// 站方有「有标题、没播放源」的随机渲染：换一个游客标记再渲染一次。
+	retryText, retryErr := d.p91GetWith(ctx, pageURL, "language=cn_CN; ga="+p91GuestMark())
+	if retryErr == nil {
+		again, _ := p91MediaCandidates(retryText, pageURL)
+		candidates = append(candidates, again...)
+		if media, err := d.p91PickMedia(ctx, candidates); err == nil {
+			return media, nil
+		}
+	}
+	if len(candidates) == 0 {
+		if blocked > 0 {
+			return providerMedia{}, errors.New("91porn 只返回了广告占位片，请重试")
+		}
+		return providerMedia{}, errors.New("91porn 未返回可播放地址")
+	}
+	return providerMedia{}, pickErr
+}
+
+// p91GuestMark 给游客标记一个每次不同的值，用来强制站方重新渲染详情页。
+func p91GuestMark() string {
+	return strconv.FormatInt(time.Now().UnixNano()%1_000_000, 10)
+}
+
+// p91PickMedia 依次探测候选地址，返回第一条真的能出流的，其余作为备用线路
+// （播放器恢复时会自动换线，用户也可以在清晰度/线路里手动换）。
+func (d *Downloader) p91PickMedia(ctx context.Context, candidates []string) (providerMedia, error) {
+	if len(candidates) == 0 {
+		return providerMedia{}, errors.New("91porn 未返回可播放地址")
+	}
+	// 整轮探测给 15 秒上限：站方 CDN 卡住时不能让「点播放」干等半分钟。
+	probeCtx, cancel := context.WithTimeout(ctx, 12*time.Second)
+	defer cancel()
+	var lastErr error
+	probed := 0
+	seen := make(map[string]bool, len(candidates))
+	for index, address := range candidates {
+		if probed >= p91ProbeLimit {
+			break
+		}
+		if seen[address] {
+			continue
+		}
+		seen[address] = true
+		probed++
+		insecure, err := d.p91Probe(probeCtx, address)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		media := d.p91MediaFor(address, insecure)
+		for _, extra := range candidates[index+1:] {
+			if len(media.Variants) >= 2 {
+				break
+			}
+			media.Variants = append(media.Variants, d.p91MediaFor(extra, false))
+		}
+		return media, nil
+	}
+	if lastErr == nil {
+		lastErr = errors.New("91porn 未返回可播放地址")
+	}
+	return providerMedia{}, fmt.Errorf("91porn 播放地址连不上（%s），请重试", p91ProbeReason(lastErr))
+}
+
+func (d *Downloader) p91MediaFor(address string, insecure bool) providerMedia {
 	return providerMedia{
 		URL:     address,
 		Referer: p91SiteURL + "/",
 		credentials: &providerMediaCredentials{
-			cookie:    p91Cookie,
-			referer:   p91SiteURL + "/",
-			userAgent: p91UserAgent,
+			cookie:      p91Cookie,
+			referer:     p91SiteURL + "/",
+			userAgent:   p91UserAgent,
+			insecureTLS: insecure,
 		},
-	}, nil
+	}
+}
+
+// p91Probe 确认直链真的能出流：先 HEAD（不消耗流量、多数 CDN 不算播放量），
+// HEAD 被拒再退到 1 段 Range GET。
+// 站方 CDN（*.91p52.com）证书链不完整（缺中间证书），标准校验会失败但流本身可播，
+// 所以遇到证书错误时用「跳过校验」再试一次，成功就记住这个源要走宽松传输。
+func (d *Downloader) p91Probe(ctx context.Context, address string) (bool, error) {
+	var lastErr error
+	for _, insecure := range []bool{false, true} {
+		if err := d.p91ProbeHeadOrGet(ctx, address, insecure); err == nil {
+			return insecure, nil
+		} else {
+			lastErr = err
+			if !p91CertificateError(err) {
+				return false, err
+			}
+		}
+	}
+	return false, lastErr
+}
+
+func (d *Downloader) p91ProbeHeadOrGet(ctx context.Context, address string, insecure bool) error {
+	err := d.p91ProbeOnce(ctx, address, http.MethodHead, insecure)
+	if err == nil || p91CertificateError(err) {
+		return err
+	}
+	return d.p91ProbeOnce(ctx, address, http.MethodGet, insecure)
+}
+
+func (d *Downloader) p91ProbeOnce(ctx context.Context, address, method string, insecure bool) error {
+	probeCtx, cancel := context.WithTimeout(ctx, 7*time.Second)
+	defer cancel()
+	request, err := http.NewRequestWithContext(probeCtx, method, address, nil)
+	if err != nil {
+		return err
+	}
+	request.Header.Set("User-Agent", p91UserAgent)
+	request.Header.Set("Referer", p91SiteURL+"/")
+	request.Header.Set("Accept", "*/*")
+	if method == http.MethodGet {
+		request.Header.Set("Range", "bytes=0-4095")
+	}
+
+	client := *d.client
+	client.Timeout = 8 * time.Second
+	if insecure {
+		client.Transport = insecureMediaTransport(d.client.Transport)
+	}
+	response, err := client.Do(request)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK && response.StatusCode != http.StatusPartialContent {
+		return fmt.Errorf("91porn 直链返回 HTTP %d", response.StatusCode)
+	}
+	if method == http.MethodHead {
+		if response.ContentLength == 0 {
+			return errors.New("91porn 直链返回空内容")
+		}
+		return nil
+	}
+	buffer := make([]byte, 512)
+	read, readErr := io.ReadFull(response.Body, buffer)
+	if readErr != nil && readErr != io.ErrUnexpectedEOF && readErr != io.EOF {
+		return readErr
+	}
+	if read == 0 {
+		return errors.New("91porn 直链返回空内容")
+	}
+	return nil
+}
+
+func p91CertificateError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var certificate *tls.CertificateVerificationError
+	return errors.As(err, &certificate) || strings.Contains(strings.ToLower(err.Error()), "certificate")
+}
+
+// p91InsecureTransport 复制一份跳过证书校验的传输层，只给证书链不完整的站方 CDN 用。
+func p91InsecureTransport(base http.RoundTripper) http.RoundTripper {
+	transport, ok := base.(*http.Transport)
+	if !ok || transport == nil {
+		return base
+	}
+	cloned := transport.Clone()
+	if cloned.TLSClientConfig == nil {
+		cloned.TLSClientConfig = &tls.Config{}
+	} else {
+		cloned.TLSClientConfig = cloned.TLSClientConfig.Clone()
+	}
+	cloned.TLSClientConfig.InsecureSkipVerify = true
+	return cloned
+}
+
+// p91ProbeReason 把底层错误压成一句用户能看懂的短说明，便于用户反馈定位。
+func p91ProbeReason(err error) string {
+	if err == nil {
+		return "未知原因"
+	}
+	var certificate *tls.CertificateVerificationError
+	if errors.As(err, &certificate) {
+		return "证书校验失败"
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "请求超时"
+	}
+	text := err.Error()
+	for _, pair := range [][2]string{
+		{"HTTP 403", "HTTP 403"},
+		{"HTTP 404", "HTTP 404"},
+		{"HTTP 5", "站方服务异常"},
+		{"no such host", "域名解析失败"},
+		{"connection reset", "连接被重置"},
+		{"connection refused", "连接被拒绝"},
+	} {
+		if strings.Contains(strings.ToLower(text), strings.ToLower(pair[0])) {
+			return pair[1]
+		}
+	}
+	return "网络不可达"
 }

@@ -444,9 +444,20 @@ class PlaybackSession extends ChangeNotifier {
     if (!_current(ticket)) return;
     _loading = false;
     _localFailure = current.local;
+    var issue = '';
+    if (!current.local) {
+      try {
+        await DiaryService.refreshNativeLogs();
+        final detail = DiaryService.lastStreamIssue();
+        if (detail != null && detail.isNotEmpty) issue = '\n诊断：$detail';
+      } catch (_) {
+        // 读日志失败不影响错误提示本身。
+      }
+      if (!_current(ticket)) return;
+    }
     _error = current.local
         ? '本地视频读取失败，请重试或重新下载；也可以改为在线播放。'
-        : '自动恢复未成功，请检查网络后重试，也可换一集或选择其他清晰度。';
+        : '自动恢复未成功，请检查网络后重试，也可换一集或选择其他清晰度。$issue';
     _notify();
   }
 

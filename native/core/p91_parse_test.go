@@ -1,6 +1,7 @@
 package core
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -208,5 +209,37 @@ func TestP91FallbackWindows(t *testing.T) {
 	}
 	if items[0].SourceID == "" || !strings.HasPrefix(items[0].ID, "p91:") {
 		t.Fatalf("兜底条目 ID 异常: %+v", items[0])
+	}
+}
+
+// 一页里可能同时有真地址、相对路径、广告片；取候选要按可靠性排序、去重并统计被拦条数。
+func TestP91MediaCandidates(t *testing.T) {
+	page := `<video id="player_one">
+<script>document.write(strencode2("%3Csource%20src%3D%22https%3A%2F%2Fccm.91p52.com%2F1.mp4%3Fst%3Da%22%3E"));</script>
+<source src="https://ccm.91p52.com/1.mp4?st=a">
+<source src="/mp43/2.mp4">
+<source src="https://cdn.kwai.net/ad/3.mp4">
+</video>`
+	list, blocked := p91MediaCandidates(page, "https://91porn.com/view_video.php?viewkey=x")
+	if len(list) != 2 {
+		t.Fatalf("候选数错误: %v", list)
+	}
+	if list[0] != "https://ccm.91p52.com/1.mp4?st=a" {
+		t.Fatalf("首选项错误: %s", list[0])
+	}
+	if list[1] != "https://91porn.com/mp43/2.mp4" {
+		t.Fatalf("次选项错误: %s", list[1])
+	}
+	if blocked == 0 {
+		t.Fatalf("广告片应计入拦截数")
+	}
+}
+
+func TestP91ProbeReason(t *testing.T) {
+	if got := p91ProbeReason(errors.New("91porn 直链返回 HTTP 403")); got != "HTTP 403" {
+		t.Fatalf("403 说明错误: %s", got)
+	}
+	if got := p91ProbeReason(errors.New("dial tcp: lookup ccm.91p52.com: no such host")); got != "域名解析失败" {
+		t.Fatalf("DNS 说明错误: %s", got)
 	}
 }
