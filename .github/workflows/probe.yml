@@ -25,10 +25,14 @@ jobs:
           SRC=$(grep -oE '<source src="[^"]+"' /tmp/d.html | head -1 | sed 's/<source src="//;s/"$//')
           echo "SRC=$SRC"
           go mod download
-          echo "===== chrome fingerprint, strict tls"
-          go run ./cmd/probe "$SRC" "$REF" || true
-          echo "===== chrome fingerprint, insecure tls"
+          echo "===== h2 strict"
+          go run ./cmd/probe "$SRC" "$REF" strict || true
+          echo "===== h2 insecure"
           go run ./cmd/probe "$SRC" "$REF" insecure || true
+          echo "===== h1 insecure"
+          go run ./cmd/probe "$SRC" "$REF" insecure,h1 || true
+          echo "===== h1 insecure plain headers"
+          go run ./cmd/probe "$SRC" "$REF" insecure,h1,plain || true
           echo "===== jiuse"
           JREF="https://91porny.com/video/view/$KEY"
           curl -sSL -m 30 -A "$UA" "$JREF" -o /tmp/j.html -w "jiuse http=%{http_code} bytes=%{size_download}\n"
