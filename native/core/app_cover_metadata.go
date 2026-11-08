@@ -76,6 +76,9 @@ func (d *Downloader) nativeCoverAddress(ctx context.Context, drama nativeDrama) 
 	case sourceViral:
 		fresh, _, err := d.fetchViralDetail(ctx, id)
 		return nativeNormalize(fresh).Cover, err
+	case sourceJiuse:
+		fresh, _, err := d.fetchJiuseDetail(ctx, id)
+		return nativeNormalize(fresh).Cover, err
 	case sourceTheporny:
 		fresh, _, err := d.fetchThepornyDetail(ctx, id)
 		return nativeNormalize(fresh).Cover, err

@@ -58,6 +58,9 @@ const (
 	// sourceViral 是 ViralXXXPorn：KVS 内核，详情页 flashvars 里直接给成品 mp4，
 	// 302 到公开 CDN（支持 Range），见 provider_viral.go。
 	sourceViral = "viral"
+	// sourceJiuse 是九色 / 91PORNY（91porny.com）：与 91porn 同源（viewkey 一致），
+	// Laravel 模板，播放走 HLS，见 provider_jiuse.go。
+	sourceJiuse = "jiuse"
 
 	providerMaxBodyBytes = 20 * 1024 * 1024
 	providerTimeout      = 12 * time.Second
@@ -138,7 +141,7 @@ func splitProviderDramaID(id string) (source, sourceID string, ok bool) {
 
 func isHuangguoProviderSource(source string) bool {
 	switch canonicalProviderSource(source) {
-	case sourceHuangguoAI, sourceHuangguoVideo, sourceHuangdou, sourceHongguo, sourceHuangju, sourceYeguo, sourceJinguoDuanju, sourceJinguo, sourceHeitao, sourceDSD, sourceCloudFront, sourceSorani, sourceGuipian, sourceHanxiaoquan, sourceIkanbot, sourceA123, sourceFanqie, sourceXChina, sourceXChinaLive, sourceTheporny, sourceP91, sourceBeabox, sourceKissav, sourceViral:
+	case sourceHuangguoAI, sourceHuangguoVideo, sourceHuangdou, sourceHongguo, sourceHuangju, sourceYeguo, sourceJinguoDuanju, sourceJinguo, sourceHeitao, sourceDSD, sourceCloudFront, sourceSorani, sourceGuipian, sourceHanxiaoquan, sourceIkanbot, sourceA123, sourceFanqie, sourceXChina, sourceXChinaLive, sourceTheporny, sourceP91, sourceBeabox, sourceKissav, sourceViral, sourceJiuse:
 		return true
 	}
 	return isDuanjuProviderSource(source) || isSekuSource(source)
@@ -192,6 +195,8 @@ func canonicalProviderSource(source string) string {
 		return sourceKissav
 	case "viral", "viralxxx", "viralxxxporn", "viralxxxporn.com", "www.viralxxxporn.com":
 		return sourceViral
+	case "jiuse", "91porny", "91porny.com", "www.91porny.com", "九色":
+		return sourceJiuse
 	default:
 		if canonical, found := duanjuSourceAliases[key]; found {
 			return canonical

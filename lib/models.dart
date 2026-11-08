@@ -34,6 +34,7 @@ class SourceSite {
       id == 'beabox' ||
       id == 'kissav' ||
       id == 'viral' ||
+      id == 'jiuse' ||
       id == 'theporny' ||
       id == 'jinguoduanju' ||
       id == 'jinguo' ||
@@ -96,6 +97,9 @@ class SourceSite {
 
   /// ViralXXX：KVS 站，详情页直接给成品 mp4，CDN 公开支持 Range。
   static const viral = SourceSite('viral', 'ViralXXX', '最新 · 分类 · 在线搜索');
+
+  /// 九色 / 91PORNY：与 91porn 同源（viewkey 一致），HLS 播放，四条 CDN 线路自动切换。
+  static const jiuse = SourceSite('jiuse', '九色', '91同源 · 最新 · 在线搜索');
 
   /// 短剧家族内置源（全剧视界可用），与 Go 侧 duanjuProviderCatalog 对齐。
   static const duanjuValues = [
@@ -244,6 +248,7 @@ class SourceSite {
     beabox,
     kissav,
     viral,
+    jiuse,
   ];
   static const knownValues = [...primaryValues, ...restrictedValues];
   static const allValues = [...primaryValues, ...restrictedValues];

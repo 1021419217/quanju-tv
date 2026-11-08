@@ -77,6 +77,8 @@ func (d *Downloader) providerBaseURL(source string) string {
 		configured, fallback = d.cfg.KissavURL, kissavBaseURL
 	case sourceViral:
 		configured, fallback = d.cfg.ViralURL, viralBaseURL
+	case sourceJiuse:
+		configured, fallback = d.cfg.JiuseURL, jiuseBaseURL
 	case sourceJinguoDuanju:
 		configured, fallback = d.cfg.JinguoDuanjuURL, jinguoDuanjuBaseURL
 	case sourceJinguo:
@@ -132,6 +134,8 @@ func providerSourceForURL(raw string) string {
 		return sourceKissav
 	case host == "viralxxxporn.com" || host == "www.viralxxxporn.com":
 		return sourceViral
+	case host == "91porny.com" || host == "www.91porny.com":
+		return sourceJiuse
 	case host == "91porn.com" || host == "www.91porn.com":
 		return sourceP91
 	default:
@@ -143,7 +147,7 @@ func (d *Downloader) providerURLCandidates(raw string) []string {
 	source := providerSourceForURL(raw)
 	// 这三个源只有一个固定域名，地址里的签名与 host 绑定，改写 host 只会 403。
 	if source == "" || source == sourceHuangju || source == sourceYeguo ||
-		source == sourceKissav || source == sourceViral || source == sourceP91 {
+		source == sourceKissav || source == sourceViral || source == sourceP91 || source == sourceJiuse {
 		return []string{raw}
 	}
 	parsed, _ := url.Parse(raw)
@@ -232,6 +236,9 @@ func (d *Downloader) resolveProviderMedia(ctx context.Context, task Task) (provi
 	}
 	if chapter.Source == sourceViral {
 		return d.resolveViralMedia(ctx, task)
+	}
+	if chapter.Source == sourceJiuse {
+		return d.resolveJiuseMedia(ctx, task)
 	}
 	if chapter.Source == sourceJinguoDuanju {
 		return d.resolveJinguoDuanjuMedia(ctx, task)
