@@ -1,12 +1,7 @@
-name: Probe 91 mirrors
+name: Probe js
 
 on:
   workflow_dispatch:
-    inputs:
-      key:
-        description: viewkey
-        required: false
-        default: "7dff460579f327b234a2"
 
 permissions:
   contents: read
@@ -14,63 +9,35 @@ permissions:
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
     steps:
-      - name: 91 系站点同源与出流验证
-        env:
-          KEY: ${{ github.event.inputs.key }}
+      - name: 拆 videoShow.js 找取流接口
         run: |
           python3 - <<'PY'
-          import os, re, ssl, urllib.request, urllib.parse
-          KEY = os.environ.get("KEY") or "7dff460579f327b234a2"
-          UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
+          import re, ssl, urllib.request
           ctx = ssl.create_default_context(); ctx.check_hostname = False; ctx.verify_mode = ssl.CERT_NONE
+          UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
 
-          def fetch(url, referer=None, rng=None, timeout=15, ua=UA):
-              req = urllib.request.Request(url, headers={"User-Agent": ua, "Accept": "*/*"})
-              if referer: req.add_header("Referer", referer)
-              if rng: req.add_header("Range", rng)
+          def get(url, timeout=25):
+              req = urllib.request.Request(url, headers={"User-Agent": UA})
+              with urllib.request.urlopen(req, timeout=timeout, context=ctx) as r:
+                  return r.read().decode("utf-8", "ignore")
+
+          urls = [
+              "https://fastly.jsdelivr.net/gh/9scdn/static@v2.8.1/videoShow.js",
+              "https://fastly.jsdelivr.net/gh/9scdn/static@v2.8.1/app.js",
+          ]
+          for u in urls:
               try:
-                  with urllib.request.urlopen(req, timeout=timeout, context=ctx) as r:
-                      return r.status, dict(r.headers), r.read()
-              except urllib.error.HTTPError as ex:
-                  return ex.code, dict(ex.headers), b""
+                  js = get(u)
               except Exception as ex:
-                  return 0, {}, str(ex).encode()
-
-          hosts = ["91porna.com","a91porn.com","91porn.mom","www.91porn.xxx","91porn.is",
-                   "91jxporn.com","www.91porn.ch","www.91porn.fm","91porn.space","91porn.com",
-                   "91porny.org","91porny.cc"]
-
-          for h in hosts:
-              for scheme in ["https"]:
-                  base = f"{scheme}://{h}"
-                  detail = None
-                  for path in ["/view_video.php?viewkey=" + KEY, "/video/view/" + KEY]:
-                      st, hdr, body = fetch(base + path, timeout=12)
-                      text = body.decode("utf-8", "ignore")
-                      if st == 200 and len(text) > 3000:
-                          detail = (base + path, text)
-                          break
-                  if not detail:
-                      print(f"{h:22s} -")
-                      continue
-                  url, text = detail
-                  cands = []
-                  for pat in [r'<source[^>]*src="([^"]+)"',
-                              r'data-src="([^"]+)"',
-                              r'(https?://[^"\'<> ]+\.m3u8[^"\'<> ]*)',
-                              r'(https?://[^"\'<> ]+\.mp4[^"\'<> ]*)',
-                              r'src:\s*[\'"]([^\'"]+\.(?:mp4|m3u8)[^\'"]*)[\'"]']:
-                      cands += re.findall(pat, text)
-                  uniq = []
-                  for c in cands:
-                      c = c.replace("\\/", "/").replace("&amp;", "&")
-                      if c not in uniq: uniq.append(c)
-                  print(f"{h:22s} HIT {url[:60]} bytes={len(text)} cands={len(uniq)}")
-                  for c in uniq[:2]:
-                      st, hdr, body = fetch(c, referer=url, rng="bytes=0-65535")
-                      kind = hdr.get("Content-Type", "")
-                      print(f"    pull {c[:80]}")
-                      print(f"         status={st} bytes={len(body)} type={kind[:30]} head={body[:40]!r}")
+                  print("ERR", u, ex); continue
+              print(f"===== {u.split('/')[-1]} bytes={len(js)}")
+              for pat in [r'["\'](/?[a-zA-Z0-9_\-/]*(?:play|line|server|unlock|vip|source|m3u8|video)[a-zA-Z0-9_\-/]*)["\']']:
+                  hits = sorted(set(re.findall(pat, js)))
+                  print("  paths:", [h for h in hits if len(h) > 3][:40])
+              for kw in ["ajax", "$.post", "$.get", "fetch(", "server", "line", "vip", "member"]:
+                  idx = js.find(kw)
+                  if idx >= 0:
+                      print(f"  [{kw}] ...{js[max(0,idx-120):idx+180]}...".replace("\n", " ")[:320])
           PY
