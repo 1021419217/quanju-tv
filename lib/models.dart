@@ -30,6 +30,7 @@ class SourceSite {
       id == 'a123' ||
       id == 'xchina' ||
       id == 'xchina-live' ||
+      id == 'p91' ||
       id == 'theporny' ||
       id == 'jinguoduanju' ||
       id == 'jinguo' ||
@@ -78,6 +79,10 @@ class SourceSite {
     'XChina·实时',
     '最新上传 · 按时间倒序',
   );
+
+  /// 91porn：站方页面直抓，默认「最近更新」按发布时间倒序，
+  /// 与网页版同一份内容，支持站方 9 个分类与关键词搜索。
+  static const p91 = SourceSite('p91', '91porn', '最近更新 · 分类 · 在线搜索');
 
   /// 短剧家族内置源（全剧视界可用），与 Go 侧 duanjuProviderCatalog 对齐。
   static const duanjuValues = [
@@ -222,6 +227,7 @@ class SourceSite {
     ...videoValues,
     // XChina 实时上新：固定按上传时间倒序，刷新整体替换第一页，用来验证上新。
     xchinaLive,
+    p91,
   ];
   static const knownValues = [...primaryValues, ...restrictedValues];
   static const allValues = [...primaryValues, ...restrictedValues];

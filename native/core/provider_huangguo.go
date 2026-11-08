@@ -46,6 +46,9 @@ const (
 	sourceJinguoDuanju = "jinguoduanju"
 	sourceJinguo       = "jinguo"
 	sourceHeitao       = "heitao"
+	// sourceP91 是 91porn：站方 PHP 页面直接抓，播放地址藏在 strencode2() 里
+	// （等价一次百分号解码），见 provider_p91.go。
+	sourceP91 = "p91"
 
 	providerMaxBodyBytes = 20 * 1024 * 1024
 	providerTimeout      = 12 * time.Second
@@ -126,7 +129,7 @@ func splitProviderDramaID(id string) (source, sourceID string, ok bool) {
 
 func isHuangguoProviderSource(source string) bool {
 	switch canonicalProviderSource(source) {
-	case sourceHuangguoAI, sourceHuangguoVideo, sourceHuangdou, sourceHongguo, sourceHuangju, sourceYeguo, sourceJinguoDuanju, sourceJinguo, sourceHeitao, sourceDSD, sourceCloudFront, sourceSorani, sourceGuipian, sourceHanxiaoquan, sourceIkanbot, sourceA123, sourceFanqie, sourceXChina, sourceXChinaLive, sourceTheporny:
+	case sourceHuangguoAI, sourceHuangguoVideo, sourceHuangdou, sourceHongguo, sourceHuangju, sourceYeguo, sourceJinguoDuanju, sourceJinguo, sourceHeitao, sourceDSD, sourceCloudFront, sourceSorani, sourceGuipian, sourceHanxiaoquan, sourceIkanbot, sourceA123, sourceFanqie, sourceXChina, sourceXChinaLive, sourceTheporny, sourceP91:
 		return true
 	}
 	return isDuanjuProviderSource(source) || isSekuSource(source)
@@ -170,6 +173,8 @@ func canonicalProviderSource(source string) string {
 		return sourceFanqie
 	case "xchina", "xchina.tube", "www.xchina.tube":
 		return sourceXChina
+	case "p91", "91porn", "91porn.com", "www.91porn.com":
+		return sourceP91
 	case "theporny", "theporny.com", "www.theporny.com":
 		return sourceTheporny
 	default:
@@ -309,6 +314,9 @@ func (d *Downloader) GetHuangguoChapters(ctx context.Context, source, sourceID s
 		return drama.DisplayTitle(), chapters, err
 	case sourceXChinaLive:
 		drama, chapters, err := d.fetchXChinaLiveDetail(ctx, sourceID)
+		return drama.DisplayTitle(), chapters, err
+	case sourceP91:
+		drama, chapters, err := d.fetchP91Detail(ctx, sourceID)
 		return drama.DisplayTitle(), chapters, err
 	case sourceTheporny:
 		drama, chapters, err := d.fetchThepornyDetail(ctx, sourceID)

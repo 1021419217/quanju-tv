@@ -757,6 +757,8 @@ func (engine *nativeEngine) nativeCatalog(ctx context.Context, input nativeInput
 	case sourceXChinaLive:
 		// 默认（全部）走 recent 时间倒序流；具体分类按站方 type 取。
 		items, result.HasMore, err = d.fetchXChinaLiveCatalogPage(ctx, page, category)
+	case sourceP91:
+		items, result.HasMore, err = d.fetchP91CatalogPage(ctx, page, category)
 	case sourceTheporny:
 		items, result.HasMore, err = d.fetchThepornyCatalogPage(ctx, page, category, "")
 	case sourceJinguoDuanju:
@@ -832,6 +834,8 @@ func (engine *nativeEngine) nativeDetail(ctx context.Context, drama nativeDrama)
 		raw, chapters, err = engine.downloader.fetchXChinaDetail(ctx, sourceID)
 	case sourceXChinaLive:
 		raw, chapters, err = engine.downloader.fetchXChinaLiveDetail(ctx, sourceID)
+	case sourceP91:
+		raw, chapters, err = engine.downloader.fetchP91Detail(ctx, sourceID)
 	case sourceTheporny:
 		raw, chapters, err = engine.downloader.fetchThepornyDetail(ctx, sourceID)
 	case sourceJinguoDuanju:

@@ -95,6 +95,8 @@ func validNativeCategory(source, category string) bool {
 	case sourceXChinaLive:
 		// 与 xchina 共用同一套站方分类，缺失/未知时回落「全部」实时流。
 		return validXChinaCategory(category)
+	case sourceP91:
+		return validP91Category(category)
 	case sourceTheporny:
 		_, ok := validThepornyCategory(category)
 		return ok
@@ -130,6 +132,12 @@ func (engine *nativeEngine) nativeCategories(ctx context.Context, source string,
 	case sourceXChinaLive:
 		// 与 xchina 一致的站方真实内容分类；「全部」保持 recent 时间倒序流。
 		for _, entry := range xchinaCategoryEntries {
+			all = append(all, nativeCategory{ID: entry.ID, Name: entry.Name})
+		}
+		return all, nil
+	case sourceP91:
+		// 「全部」= 站方「最近更新」（rf），其余是站方导航分类原样。
+		for _, entry := range p91CategoryEntries {
 			all = append(all, nativeCategory{ID: entry.ID, Name: entry.Name})
 		}
 		return all, nil

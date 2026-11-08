@@ -63,6 +63,8 @@ func (d *Downloader) providerBaseURL(source string) string {
 	case sourceXChinaLive:
 		// 与 xchina 同一个站，域名配置共用。
 		configured, fallback = d.cfg.XChinaURL, xchinaBaseURL
+	case sourceP91:
+		fallback = p91SiteURL
 	case sourceTheporny:
 		configured, fallback = d.cfg.ThepornyURL, thepornyHosts[0]
 	case sourceJinguoDuanju:
@@ -197,6 +199,9 @@ func (d *Downloader) resolveProviderMedia(ctx context.Context, task Task) (provi
 	}
 	if chapter.Source == sourceXChinaLive {
 		return d.resolveXChinaMedia(ctx, task)
+	}
+	if chapter.Source == sourceP91 {
+		return d.resolveP91Media(ctx, task)
 	}
 	if chapter.Source == sourceTheporny {
 		return d.resolveThepornyMedia(ctx, task)
