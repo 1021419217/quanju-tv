@@ -9,33 +9,34 @@ permissions:
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.24.1'
-      - name: Chrome 指纹请求媒体地址
-        working-directory: native
+      - name: 抓 91 作者页与九色分类页结构
         run: |
-          UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+          UA91="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
           KEY=e7f9b65d89f5238b6211
           REF="https://91porn.com/view_video.php?viewkey=$KEY"
-          curl -sSL -m 30 -A "$UA" -H "Cookie: language=cn_CN; ga=1" "$REF" -o /tmp/d.html -w "detail http=%{http_code} bytes=%{size_download}\n"
-          SRC=$(grep -oE '<source src="[^"]+"' /tmp/d.html | head -1 | sed 's/<source src="//;s/"$//')
-          echo "SRC=$SRC"
-          go mod download
-          echo "===== h2 strict"
-          go run ./cmd/probe "$SRC" "$REF" strict || true
-          echo "===== h2 insecure"
-          go run ./cmd/probe "$SRC" "$REF" insecure || true
-          echo "===== h1 insecure"
-          go run ./cmd/probe "$SRC" "$REF" insecure,h1 || true
-          echo "===== h1 insecure plain headers"
-          go run ./cmd/probe "$SRC" "$REF" insecure,h1,plain || true
-          echo "===== jiuse"
-          JREF="https://91porny.com/video/view/$KEY"
-          curl -sSL -m 30 -A "$UA" "$JREF" -o /tmp/j.html -w "jiuse http=%{http_code} bytes=%{size_download}\n"
-          JSRC=$(grep -oE 'data-src="[^"]+"' /tmp/j.html | head -1 | cut -d'"' -f2)
-          echo "JSRC=$JSRC"
-          go run ./cmd/probe "$JSRC" "$JREF" insecure || true
+          curl -sSL -m 30 -A "$UA91" -H "Cookie: language=cn_CN; ga=1" "$REF" -o /tmp/d.html
+          echo "===== detail author links"
+          grep -oE 'href="[^"]*u(profile|videos)\.php\?UID=[^"]*"[^>]*>[^<]{0,40}' /tmp/d.html | head -5
+          UID=$(grep -oE 'u(profile|videos)\.php\?UID=([0-9A-Za-z_-]+)' /tmp/d.html | head -1 | sed 's/.*UID=//')
+          echo "UID=$UID"
+          echo "===== uvideos page"
+          curl -sSL -m 30 -A "$UA91" -H "Cookie: language=cn_CN; ga=1" -e "$REF" "https://91porn.com/uvideos.php?UID=$UID&page=1" -o /tmp/u.html -w "http=%{http_code} bytes=%{size_download}\n"
+          echo "--- viewkey links"
+          grep -oE 'view_video\.php\?[^"]{0,80}' /tmp/u.html | head -8
+          echo "--- own= links"
+          grep -oE '[^"]{0,60}own=1[^"]{0,60}' /tmp/u.html | head -5
+          echo "--- card sample"
+          grep -oE '.{0,80}viewkey.{0,80}' /tmp/u.html | head -6
+          echo "===== uprofile page"
+          curl -sSL -m 30 -A "$UA91" -H "Cookie: language=cn_CN; ga=1" -e "$REF" "https://91porn.com/uprofile.php?UID=$UID" -o /tmp/p.html -w "http=%{http_code} bytes=%{size_download}\n"
+          grep -oE 'view_video\.php\?[^"]{0,80}' /tmp/p.html | head -5
+          echo "===== jiuse category"
+          UA="Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
+          for C in latest hot-list ori hd; do
+            echo "-- $C"
+            curl -sSL -m 25 -A "$UA" "https://91porny.com/video/category/$C" -o /tmp/jc.html -w "http=%{http_code} bytes=%{size_download}\n"
+            echo "cards=$(grep -c 'colVideoList' /tmp/jc.html) views=$(grep -c 'href="/video/view/' /tmp/jc.html)"
+            grep -oE 'href="/video/view/[0-9a-f]+"' /tmp/jc.html | head -2
+          done
