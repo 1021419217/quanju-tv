@@ -1157,6 +1157,17 @@ func (d *Downloader) resolveP91Media(ctx context.Context, task Task) (providerMe
 	if sourceID == "" || strings.ContainsAny(sourceID, "/?#& ") {
 		return providerMedia{}, errors.New("91porn 播放请求缺少有效的视频 ID")
 	}
+	// 缓存里的地址可能已经过了有效期（e= 时间戳），当作没有地址重新解析，
+	// 否则每次起播都是 302，用户看到的就是「怎么都播不出来」。
+	if len(candidates) > 0 {
+		fresh := make([]string, 0, len(candidates))
+		for _, candidate := range candidates {
+			if !p91MediaExpired(candidate) {
+				fresh = append(fresh, candidate)
+			}
+		}
+		candidates = fresh
+	}
 	// 借九色取流（细节见 provider_p91_jiuse.go）。
 	//
 	// 2026-11 实测：91 自己的 CDN 对 HTML5 播放器几乎全线掐断（HTTP/2

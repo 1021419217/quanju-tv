@@ -1,6 +1,9 @@
 package core
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // 以下片段取自 91porny.com 真实页面（2026-11 抓取），保留原始属性顺序，
 // 用于回归「站方改版把正则打断」这一类问题。
@@ -200,5 +203,47 @@ func TestJiuseCategoryValidation(t *testing.T) {
 		if validJiuseCategory(dead) {
 			t.Fatalf("%s 是死分类，应被拒", dead)
 		}
+	}
+}
+
+func TestJiuseAuthorSlugValidation(t *testing.T) {
+	for _, ok := range []string{"abc", "user_name-1", "a.b"} {
+		if !validJiuseAuthorSlug(ok) {
+			t.Fatalf("%s 应合法", ok)
+		}
+	}
+	for _, bad := range []string{"", "  ", "a/b", "../x", "名字", strings.Repeat("a", 97)} {
+		if validJiuseAuthorSlug(bad) {
+			t.Fatalf("%q 应被拒", bad)
+		}
+	}
+}
+
+func TestParseJiuseCardsSkipsVip(t *testing.T) {
+	page := `<div class="colVideoList">
+	<a href="/video/view/e7f9b65d89f5238b6211"><img class="img" src="/a.jpg"></a>
+	<a class="title" href="/video/view/e7f9b65d89f5238b6211">VIP 片</a>
+	<small class="layer">03:20</small><small class="vip-layer">高清</small>
+</div>
+<div class="colVideoList">
+	<a href="/video/view/7dff460579f327b234a2"><img class="img" src="/b.jpg"></a>
+	<a class="title" href="/video/view/7dff460579f327b234a2">免费片</a>
+	<small class="layer">05:00</small>
+</div>`
+
+	all := parseJiuseCards(page, "")
+	if len(all) != 2 {
+		t.Fatalf("不过滤时应有两张卡，实际 %d", len(all))
+	}
+	if all[0].VIP == nil || !*all[0].VIP {
+		t.Fatal("带 vip-layer 的卡片应标 VIP")
+	}
+
+	free := parseJiuseCardsFiltered(page, "", true)
+	if len(free) != 1 || free[0].SourceID != "7dff460579f327b234a2" {
+		t.Fatalf("过滤后应只剩免费片，实际 %+v", free)
+	}
+	if got := jiuseFreeOnly(all); len(got) != 1 || got[0].SourceID != "7dff460579f327b234a2" {
+		t.Fatalf("jiuseFreeOnly 结果不对：%+v", got)
 	}
 }

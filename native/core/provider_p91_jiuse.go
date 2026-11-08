@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -31,7 +32,17 @@ import (
 // VIP 新片池才 1002（详见 provider_jiuse.go 的分类注释）。91 自己的 CDN 现在
 // 对 HTML5 播放器基本全线掐断（PROTOCOL_ERROR），而同一个 viewkey 在九色的
 // 免费池里能拿到正经 HLS，所以这条通道重新打开。
-const p91JiuseFallbackEnabled = true
+// 2026-11-09 实测（GitHub Actions 海外机房 + 真实详情页）：
+//
+//	带 Referer 请求 https://la.btc620.com//mp43/{id}.mp4?st=…&e=…&k=…&f=…
+//	  → HTTP 206，65536 字节正常返回
+//	去掉 Referer → 连接直接被掐（http=000）
+//	去掉签名   → HTTP 302
+//
+// 也就是说 91 直链本身是好的，签名也是完整的（st 22 位 / e 10 位 / k 6 位 /
+// f 154 位），真正的问题是「先走九色」这一步：九色对 91 的新片一律 1002，
+// 每次起播白等最多 8 秒，用户看到的就是一直转圈。所以关掉借道，回到直链优先。
+const p91JiuseFallbackEnabled = false
 
 // p91JiuseFirst：91 直链先不试，直接走九色。
 //
@@ -70,6 +81,28 @@ func p91MediaSignatureMissing(address string) bool {
 		}
 	}
 	return true
+}
+
+// p91MediaExpired 判断直链签名是否已过期。
+//
+// 91 的 mp4 地址带 e=<unix 秒>，是本条地址的失效时间。详情一旦进缓存
+// （列表里点开的卡片、上次看过的剧集），下次起播拿到的就是过期地址，
+// CDN 直接 302 —— 表现就是「同一部片刚才能播，现在一直播不出来」。
+// 留 30 秒余量，到期前就当作没有地址，回源重新解析。
+func p91MediaExpired(address string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(address))
+	if err != nil {
+		return false
+	}
+	raw := strings.TrimSpace(parsed.Query().Get("e"))
+	if raw == "" {
+		return false
+	}
+	seconds, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || seconds <= 0 {
+		return false
+	}
+	return time.Now().Unix()+30 >= seconds
 }
 
 // p91JiuseDegraded 表示当前处于「91 直链刚失败过」的降级窗口。

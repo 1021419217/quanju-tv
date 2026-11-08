@@ -162,6 +162,8 @@ var (
 	reJiuseCardImg   = regexp.MustCompile(`(?is)<img class="img"[^>]*\bsrc="([^"]+)"`)
 	reJiuseCardLayer = regexp.MustCompile(`<small class="layer">\s*([0-9:]{4,10})\s*</small>`)
 	reJiuseCardAuth  = regexp.MustCompile(`作者:\s*<a[^>]*href="/author/([^"]+)"[^>]*>([^<]{0,80})</a>`)
+	// 详情页的作者区不一定带「作者:」前缀，只认链接本身。
+	reJiuseAuthorLink = regexp.MustCompile(`<a[^>]*href="/author/([^"]+)"[^>]*>([^<]{1,80})</a>`)
 
 	reJiusePlayer    = regexp.MustCompile(`(?is)<video[^>]*id="video-play"[^>]*>`)
 	reJiuseDataSrc   = regexp.MustCompile(`data-src="([^"]+)"`)
@@ -253,6 +255,16 @@ func jiuseDrama(id, title, cover, author, authorID, category string, duration an
 // parseJiuseCards 按卡片容器切块：同一块里的 display 链接与标题链接指向同一
 // 个 viewkey，外链广告卡片没有 /video/view/ 地址，会被自然跳过。
 func parseJiuseCards(pageText, category string) []Drama {
+	return parseJiuseCardsFiltered(pageText, category, false)
+}
+
+// parseJiuseCardsFiltered 是 parseJiuseCards 的可过滤版本。
+//
+// skipVip 只给「全部」用：站内每个类目页都混着带 <small class="vip-layer">高清</small>
+// 角标的卡片，这类卡片点进去 CDN 一律回 1002（见 resolveJiuseMedia）。用户在
+// 真机上验证「分类里的带标片能播、首页的带标片不能播」，所以只清洗默认入口，
+// 具体分类保持原样，避免误杀。
+func parseJiuseCardsFiltered(pageText, category string, skipVip bool) []Drama {
 	locs := reJiuseCardStart.FindAllStringIndex(pageText, -1)
 	items := make([]Drama, 0, len(locs))
 	seen := make(map[string]bool, len(locs))
@@ -287,8 +299,12 @@ func parseJiuseCards(pageText, category string) []Drama {
 		} else if match := reJiuseCardAuthPlain.FindStringSubmatch(block); match != nil {
 			author = p91CleanText(match[1])
 		}
+		vip := reJiuseVipLayer.MatchString(block)
 		seen[id] = true
-		items = append(items, jiuseDrama(id, title, cover, author, authorID, category, nil, reJiuseVipLayer.MatchString(block)))
+		if skipVip && vip {
+			continue
+		}
+		items = append(items, jiuseDrama(id, title, cover, author, authorID, category, nil, vip))
 	}
 	return items
 }
@@ -316,11 +332,51 @@ func jiuseCatalogAddress(page int, category, query string) string {
 	return jiuseBase() + path
 }
 
+// jiuseMinCatalogItems 是一屏至少要有的条数。清洗掉 VIP 卡片后不足这个数，
+// 就继续往后补页，避免「全部」第一屏稀稀拉拉只剩三四个。
+const jiuseMinCatalogItems = 8
+
 func (d *Downloader) fetchJiuseCatalogPage(ctx context.Context, page int, category, query string) ([]Drama, bool, error) {
 	if page < 1 || page > 100000 || !validJiuseCategory(category) || len(query) > 128 {
 		return nil, false, errors.New("九色目录查询参数无效")
 	}
 	d.ensureJiuseBase(ctx)
+	items, hasMore, err := d.fetchJiuseCatalogRaw(ctx, page, category, query)
+	if err != nil {
+		return nil, false, err
+	}
+	// 只清洗默认入口（「全部」），具体分类保持原样。
+	if strings.TrimSpace(category) != "" {
+		return items, hasMore, nil
+	}
+	kept := jiuseFreeOnly(items)
+	if len(kept) == 0 {
+		// 整页都是 VIP 片：原样返回比空屏好，至少能看到有什么。
+		return items, hasMore, nil
+	}
+	// 剔完不够一屏就往后再抓两页补齐（同一批 ID 去重）。
+	for offset := 1; offset <= 2 && hasMore && len(kept) < jiuseMinCatalogItems; offset++ {
+		next, nextMore, err := d.fetchJiuseCatalogRaw(ctx, page+offset, category, query)
+		if err != nil {
+			break
+		}
+		hasMore = nextMore
+		seen := make(map[string]bool, len(kept))
+		for _, item := range kept {
+			seen[item.ID] = true
+		}
+		for _, item := range jiuseFreeOnly(next) {
+			if seen[item.ID] {
+				continue
+			}
+			seen[item.ID] = true
+			kept = append(kept, item)
+		}
+	}
+	return kept, hasMore, nil
+}
+
+func (d *Downloader) fetchJiuseCatalogRaw(ctx context.Context, page int, category, query string) ([]Drama, bool, error) {
 	address := jiuseCatalogAddress(page, category, query)
 	pageText, err := d.fetchProviderText(ctx, address, jiuseBase()+"/")
 	if err != nil {
@@ -328,8 +384,19 @@ func (d *Downloader) fetchJiuseCatalogPage(ctx context.Context, page int, catego
 	}
 	items := parseJiuseCards(pageText, category)
 	// 站方每页固定 24 条；取满就认为还有下一页，不足即到底。
-	hasMore := len(items) >= jiusePageSize
-	return items, hasMore, nil
+	return items, len(items) >= jiusePageSize, nil
+}
+
+// jiuseFreeOnly 去掉带 VIP 角标的卡片。
+func jiuseFreeOnly(items []Drama) []Drama {
+	kept := make([]Drama, 0, len(items))
+	for _, item := range items {
+		if item.VIP != nil && *item.VIP {
+			continue
+		}
+		kept = append(kept, item)
+	}
+	return kept
 }
 
 func jiuseCategoriesForSource() []nativeCategory {
@@ -389,7 +456,7 @@ func parseJiuseDetail(pageText, sourceID string) (Drama, []Chapter, error) {
 	if !strings.Contains(pageText, "/video/view/"+sourceID) {
 		return Drama{}, nil, errors.New("九色详情与请求视频不符，请刷新重试")
 	}
-	pageURL := jiuseBaseURL + "/video/view/" + sourceID
+	pageURL := jiuseBase() + "/video/view/" + sourceID
 	title := ""
 	if match := reJiuseH4.FindStringSubmatch(pageText); match != nil {
 		title = p91CleanText(match[1])
@@ -412,6 +479,16 @@ func parseJiuseDetail(pageText, sourceID string) (Drama, []Chapter, error) {
 		author = p91CleanText(match[2])
 	} else if match := reJiuseCardAuthPlain.FindStringSubmatch(pageText); match != nil {
 		author = p91CleanText(match[1])
+	}
+	// 详情页把作者放在 <a href="/author/{slug}"> 里，不带「作者:」前缀，
+	// 上面两条都对不上，于是作者名有了但点不动。这里补一条只认链接的兜底。
+	if authorID == "" {
+		if match := reJiuseAuthorLink.FindStringSubmatch(pageText); match != nil {
+			authorID = strings.TrimSpace(match[1])
+			if author == "" {
+				author = p91CleanText(match[2])
+			}
+		}
 	}
 	// 详情页整页里会带上样式表与推荐位的 vip-layer，按整页判断必然误判成 VIP
 	// （每部片都会被标「高清」）。VIP 只由列表卡片决定，这里不再判定。
@@ -584,3 +661,50 @@ var (
 	reJiuseOgTitle = regexp.MustCompile(`(?is)<meta property="og:title" content="([^"]*)"`)
 	reJiuseOgImage = regexp.MustCompile(`(?is)<meta property="og:image" content="([^"]*)"`)
 )
+
+// ---- 作者主页 ----
+
+// validJiuseAuthorSlug 校验作者路径参数。站内作者地址是 /author/{slug}，
+// slug 只由字母、数字、- _ . 组成，带别的一律拒掉，避免把任意路径拼进请求。
+func validJiuseAuthorSlug(slug string) bool {
+	slug = strings.TrimSpace(slug)
+	if slug == "" || len(slug) > 96 {
+		return false
+	}
+	for _, char := range slug {
+		switch {
+		case char >= 'a' && char <= 'z', char >= 'A' && char <= 'Z',
+			char >= '0' && char <= '9', char == '-', char == '_', char == '.':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// fetchJiuseAuthorPage 取某个作者发布的其它作品。
+//
+// 作者页与列表页共用同一套卡片（div.colVideoList + img.img + /video/view/{id}），
+// 所以直接复用 parseJiuseCards；老卡片只写「作者: 名字」不带链接，那种拿不到
+// slug，也就进不了这个页面。
+func (d *Downloader) fetchJiuseAuthorPage(ctx context.Context, authorID string, page int) ([]Drama, bool, error) {
+	authorID = strings.TrimSpace(authorID)
+	if !validJiuseAuthorSlug(authorID) {
+		return nil, false, errors.New("九色作者 ID 无效")
+	}
+	if page < 1 || page > 100000 {
+		page = 1
+	}
+	d.ensureJiuseBase(ctx)
+	address := jiuseBase() + "/author/" + url.PathEscape(authorID)
+	if page > 1 {
+		address += "?page=" + strconv.Itoa(page)
+	}
+	pageText, err := d.fetchProviderText(ctx, address, jiuseBase()+"/")
+	if err != nil {
+		return nil, false, err
+	}
+	items := parseJiuseCards(pageText, "")
+	// 站方每页 24 条，取满即认为还有下一页。
+	return items, len(items) >= jiusePageSize, nil
+}

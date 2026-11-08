@@ -99,7 +99,7 @@ class SourceSite {
   static const viral = SourceSite('viral', 'ViralXXX', '最新 · 分类 · 在线搜索');
 
   /// 九色 / 91PORNY：与 91porn 同源（viewkey 一致），HLS 播放，四条 CDN 线路自动切换。
-  static const jiuse = SourceSite('jiuse', '九色', '91同源 · 免费收藏榜 · 在线搜索');
+  static const jiuse = SourceSite('jiuse', '九色', '91同源 · 免费老片 · 作者作品');
 
   /// 短剧家族内置源（全剧视界可用），与 Go 侧 duanjuProviderCatalog 对齐。
   static const duanjuValues = [

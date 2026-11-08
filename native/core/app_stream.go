@@ -183,7 +183,13 @@ func (stream *nativeStreamServer) nativeFetchWithFallback(ctx context.Context, r
 			return nil, nil, err
 		}
 		upstream.Header.Set("User-Agent", userAgent)
-		upstream.Header.Set("Referer", session.referer)
+		if session.referer != "" {
+			upstream.Header.Set("Referer", session.referer)
+		}
+		// 91 的片源 CDN 只认「像播放器」的请求：除了 Referer，还要 Accept
+		// 与 identity 编码（实测不带 Referer 直接掐连接，返回 http=000）。
+		upstream.Header.Set("Accept", "*/*")
+		upstream.Header.Set("Accept-Encoding", "identity")
 		for _, name := range []string{"Range", "If-Range"} {
 			if value := request.Header.Get(name); value != "" {
 				upstream.Header.Set(name, value)
