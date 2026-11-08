@@ -1146,9 +1146,12 @@ func (d *Downloader) p91MediaFor(address string, insecure bool, referer string) 
 			referer:     referer,
 			userAgent:   p91UserAgent,
 			insecureTLS: insecure,
-			// 站方 CDN 会掐长连接（看几秒到几十秒就断），播放端看到的就是「传输中断」。
-			// 标记成可续传，本地中转在断点处自动重新拉一段，播放器不用重连。
-			resilient:  true,
+			// 3.17~3.21 在这里标记了可续传，让本地中转在断流处用 Range 重拉。
+			// 实测反而更差：站方 CDN 对「同一条带签名的直链发第二次 Range 请求」
+			// 大多直接回 403/416，续传救不回来，还把游客配额打得更凶，
+			// 表现就是「10 个里 9 个播不出」。3.15 那种纯直通（io.Copy）反而是
+			// 用户反馈「大部分都能播」的版本，所以这里关掉续传，让 mpv 自己重连。
+			resilient:  false,
 			sendCookie: true,
 		},
 	}
@@ -1330,9 +1333,10 @@ func p91AuthorOf(fragment string) (string, string) {
 	return name, uid
 }
 
-// p91ValidAuthorID 校验作者 UID：站方是 32~64 位的字母数字串。
+// p91ValidAuthorID 校验作者 UID。站方主流是 32 位哈希串，但老账号是纯数字，
+// 早期要求至少 8 位会把这类作者直接判成「作者 ID 无效」，作者页自然一直空。
 func p91ValidAuthorID(uid string) bool {
-	if len(uid) < 8 || len(uid) > 96 {
+	if len(uid) < 2 || len(uid) > 96 {
 		return false
 	}
 	for _, char := range uid {
@@ -1362,18 +1366,23 @@ func (d *Downloader) fetchP91AuthorPage(ctx context.Context, uid string, page in
 		base,
 	}
 	var lastErr error
+	requested := false
+	diagnostics := make([]string, 0, len(addresses))
 	for _, address := range addresses {
 		pageText, err := d.p91Get(ctx, address)
 		if err != nil {
 			lastErr = err
+			diagnostics = append(diagnostics, "请求失败:"+err.Error())
 			continue
 		}
+		requested = true
 		items := parseP91Cards(pageText, "")
 		if len(items) == 0 {
 			// 该套模板的 div/well 结构对不上时，直接按 viewkey 开窗兜底。
 			items = p91ItemsFromCards(p91FallbackWindows(pageText), "")
 		}
 		if len(items) == 0 {
+			diagnostics = append(diagnostics, fmt.Sprintf("%d字节/0条/viewkey%d", len(pageText), len(p91ViewkeysIn(pageText))))
 			continue
 		}
 		for index := range items {
@@ -1382,8 +1391,10 @@ func (d *Downloader) fetchP91AuthorPage(ctx context.Context, uid string, page in
 		}
 		return items, len(items) >= 8, nil
 	}
-	if lastErr != nil {
+	if !requested && lastErr != nil {
 		return nil, false, lastErr
 	}
-	return nil, false, nil
+	// 三套模板都没作品时把原始响应的体量/viewkey 数带出来：界面会显示这句话，
+	// 用户截图就能判断到底是被登录墙拦了（页面正常但 0 个 viewkey），还是解析问题。
+	return nil, false, fmt.Errorf("该作者暂无公开作品（诊断：%s）", strings.Join(diagnostics, "；"))
 }

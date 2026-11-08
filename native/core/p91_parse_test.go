@@ -380,7 +380,7 @@ func TestP91ValidAuthorID(t *testing.T) {
 			t.Fatalf("应通过: %s", uid)
 		}
 	}
-	for _, uid := range []string{"", "short", "../etc/passwd", "uid with space", "a&b=cdefgh"} {
+	for _, uid := range []string{"", "../etc/passwd", "uid with space", "a&b=cdefgh"} {
 		if p91ValidAuthorID(uid) {
 			t.Fatalf("应拒绝: %q", uid)
 		}
@@ -454,7 +454,9 @@ func TestP91ResolveReturnsDetailAddressInstantly(t *testing.T) {
 	if media.URL != "https://ccm.91p52.com/1.mp4?st=x" {
 		t.Fatalf("地址错误: %s", media.URL)
 	}
-	if media.credentials == nil || !media.credentials.resilient {
-		t.Fatalf("续传标记丢了")
+	// 3.17~3.21 走过续传，但站方 CDN 对同一签名地址的二次 Range 请求大多
+	// 直接 403/416，续传反而把「大部分能播」拖成「9/10 播不出」。回到直通。
+	if media.credentials == nil || media.credentials.resilient {
+		t.Fatalf("91porn 不该再标记续传")
 	}
 }

@@ -470,7 +470,8 @@ func (d *Downloader) fetchProviderRequest(ctx context.Context, rawURL, referer s
 			if cookie, ok := ctx.Value(providerTextCookieKey{}).(string); ok && cookie != "" {
 				req.Header.Set("Cookie", cookie)
 			}
-			if providerSourceForURL(rawURL) != "" {
+			source := providerSourceForURL(rawURL)
+			if source != "" {
 				req.Header.Set("Referer", providerRefererForURL(candidate, referer))
 			} else {
 				req.Header.Set("Referer", referer)
@@ -489,12 +490,16 @@ func (d *Downloader) fetchProviderRequest(ctx context.Context, rawURL, referer s
 			if noCache, _ := ctx.Value(providerTextNoCacheKey{}).(bool); noCache {
 				req.Header.Set("Cache-Control", "no-cache")
 			}
-			resp, err := d.doCatalogRequestWithTimeout(req, timeout)
-			if err != nil {
-				// 站方 WAF 或中间设备直接掐断 TLS 时，Go 看到的是 EOF/reset，
-				// 浏览器却能打开。用 TLS1.2+HTTP1.1 的兼容客户端补一次再判断，
-				// 只对 GET 生效（POST 的 body 已被消费）。
-				if payload == nil && providerTransportBroken(err) {
+			// KISSAV 在开了全局代理的手机上照样 EOF：代理对 TLS1.3 / HTTP2 的
+			// 处理与浏览器不同，而 Go 不会像浏览器那样自动退回 1.1。该源第一条
+			// 请求就直接用 TLS1.2+HTTP1.1 的兼容客户端，不等失败再重试。
+			var resp *http.Response
+			if source == sourceKissav {
+				resp, err = d.doCompatCatalogRequest(req, timeout)
+			} else {
+				resp, err = d.doCatalogRequestWithTimeout(req, timeout)
+				if err != nil && payload == nil && providerTransportBroken(err) {
+					// 其它源只在「像被掐断」时补一次兼容重试。
 					if retryResp, retryErr := d.doCompatCatalogRequest(req, timeout); retryErr == nil {
 						resp, err = retryResp, nil
 					}

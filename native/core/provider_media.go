@@ -128,6 +128,12 @@ func providerSourceForURL(raw string) string {
 		return sourceXChina
 	case host == "theporny.com" || host == "www.theporny.com":
 		return sourceTheporny
+	case host == "kissavs.com" || host == "www.kissavs.com":
+		return sourceKissav
+	case host == "viralxxxporn.com" || host == "www.viralxxxporn.com":
+		return sourceViral
+	case host == "91porn.com" || host == "www.91porn.com":
+		return sourceP91
 	default:
 		return ""
 	}
@@ -135,7 +141,9 @@ func providerSourceForURL(raw string) string {
 
 func (d *Downloader) providerURLCandidates(raw string) []string {
 	source := providerSourceForURL(raw)
-	if source == "" || source == sourceHuangju || source == sourceYeguo {
+	// 这三个源只有一个固定域名，地址里的签名与 host 绑定，改写 host 只会 403。
+	if source == "" || source == sourceHuangju || source == sourceYeguo ||
+		source == sourceKissav || source == sourceViral || source == sourceP91 {
 		return []string{raw}
 	}
 	parsed, _ := url.Parse(raw)
