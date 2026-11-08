@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -23,18 +24,20 @@ import (
 //   搜索：/search_result.php?search_id=<关键词>&search_type=search_videos&viewtype=basic
 //   详情：/view_video.php?viewkey=<id>
 //
-// 两个必须照做的细节（来自站方现行行为，实测于第三方维护中的解析器）：
-//  1. 请求必须带 Cookie `language=cn_CN; level=7`。桌面页 + level=7 才下发
-//     strencode2 的真播放地址；否则只给一条广告占位片。
+// 三个必须照做的细节（来自站方 2026 年现行行为，第三方解析器实测）：
+//  1. 请求要带 Cookie `language=cn_CN`，站点才给中文界面；再带游客标记 `ga`
+//     （值不限，`1` 亦可）。不带 ga 时站点按会话随机挑一部片渲染媒体与封面，
+//     表现为「标题对、播放/封面对不上」，所以固定给一个值把渲染钉住。
 //  2. 真地址藏在 document.write(strencode2("<URL 编码的 <source> 标签>")) 里，
 //     而 strencode2 的实现就是 unescape()，等价于一次百分号解码，不需要跑 JS。
-//
-// 页面里直出的 <source src="...ccm.91p52.com/xxx.mp4"> 是广告占位，必须排除。
+//  3. 真播放地址就在 `*.91p52.com` 上（如 https://ccm.91p52.com/358999.mp4?st=…），
+//     这个域名是站方自己的 CDN，不能当广告过滤掉 —— 早期版本误滤，导致
+//     「列表正常、点进去永远提示未返回可播放地址」。
 
 const (
 	p91SiteURL   = "https://91porn.com"
 	p91UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-	p91Cookie    = "language=cn_CN; level=7"
+	p91Cookie    = "language=cn_CN; ga=1"
 )
 
 // p91CategoryEntries 是站方导航里的分类，原样保留。
@@ -78,24 +81,28 @@ func p91CategoryName(category string) string {
 
 var (
 	p91CardRE     = regexp.MustCompile(`(?s)<div class="well well-sm videos-text-align">(.*?)</div>\s*</div>`)
-	p91ViewkeyRE  = regexp.MustCompile(`view_video\.php\?viewkey=([0-9a-zA-Z]+)`)
+	p91ViewkeyRE  = regexp.MustCompile(`view_video(?:_hd)?\.php\?viewkey=([0-9a-zA-Z]+)`)
 	p91TitleRE    = regexp.MustCompile(`(?s)<span class="video-title[^"]*">(.*?)</span>`)
 	p91ThumbRE    = regexp.MustCompile(`<img[^>]+src="([^"]+)"`)
 	p91DurationRE = regexp.MustCompile(`<span class="duration">\s*([0-9:]+)\s*</span>`)
 	p91FromRE     = regexp.MustCompile(`<span class="info">From:</span>\s*([^<]*)`)
 	p91TagRE      = regexp.MustCompile(`<[^>]*>`)
 
-	p91StrencodeRE = regexp.MustCompile(`strencode2\("([^"]+)"\)`)
-	p91SrcRE       = regexp.MustCompile(`src=["']([^"']+)["']`)
-	p91MP4RE       = regexp.MustCompile(`(?i)(https?://[^\s"'<>]+\.mp4[^\s"'<>]*)`)
+	p91SourceTagRE = regexp.MustCompile(`(?i)<source[^>]+src\s*=\s*["']?([^"'\s>]+)`)
+	p91VideoTagRE  = regexp.MustCompile(`(?i)<video[^>]+src\s*=\s*["']?([^"'\s>]+)`)
+	p91MediaURLRE  = regexp.MustCompile(`(?i)https?://[^\s"'<>\\]+?\.(?:mp4|m3u8)[^\s"'<>\\]*`)
 
 	p91PageTitleRE = regexp.MustCompile(`(?s)<title>(.*?)</title>`)
 	p91PosterRE    = regexp.MustCompile(`poster="([^"]+)"`)
 	p91OGImageRE   = regexp.MustCompile(`(?i)og:image["'][^>]+content=["']([^"']+)`)
 	p91DateRE      = regexp.MustCompile(`<span class="title-yakov">(\d{4}-\d{2}-\d{2})</span>`)
-	p91DailyRE     = regexp.MustCompile(`作为游客，你每天只可观看\s*(\d+)\s*个视频`)
+	p91DailyRE     = regexp.MustCompile(`每天只可观看\s*(\d+)\s*个视频`)
 	p91DeletedText = "视频不存在,可能已经被删除或者被举报为不良内容"
 )
+
+// p91AdMediaHosts 是站方贴片广告/统计用的域名，只排除这些；站方自家 CDN
+// （91p52.com、rsc.cdn77.org）承载真播放流，绝不能进这个表。
+var p91AdMediaHosts = []string{"kwai.net", "xhlive.net", "9splt.com", "jads.co", "storagexhd.com", "91p52.net"}
 
 // ---- 请求 ----
 
@@ -360,17 +367,17 @@ func (d *Downloader) fetchP91Detail(ctx context.Context, sourceID string) (Drama
 	}
 
 	drama := Drama{
-		ID:         providerDramaID(sourceP91, sourceID),
-		Source:     sourceP91,
-		SourceID:   sourceID,
-		Title:      title,
-		Name:       title,
+		ID:          providerDramaID(sourceP91, sourceID),
+		Source:      sourceP91,
+		SourceID:    sourceID,
+		Title:       title,
+		Name:        title,
 		ChannelName: "91porn",
-		Cover:      cover,
-		OnlineDate: onlineDate,
+		Cover:       cover,
+		OnlineDate:  onlineDate,
 	}
 
-	address, sourceErr := p91SourceFromPage(pageText)
+	address, sourceErr := p91SourceFromPage(pageText, pageURL)
 	chapter := Chapter{
 		ID:       providerChapterID(sourceP91, sourceID, "main"),
 		Source:   sourceP91,
@@ -389,47 +396,214 @@ func (d *Downloader) fetchP91Detail(ctx context.Context, sourceID string) (Drama
 }
 
 // p91SourceFromPage 从详情页提取真实播放地址。
-func p91SourceFromPage(pageText string) (string, error) {
-	if m := p91StrencodeRE.FindStringSubmatch(pageText); m != nil {
-		// strencode2 等价于 unescape()：一次百分号解码即可。
-		decoded, err := url.PathUnescape(m[1])
-		if err == nil {
-			if src := p91SrcRE.FindStringSubmatch(decoded); src != nil {
-				address := strings.TrimSpace(html.UnescapeString(src[1]))
-				if p91PlayableMediaURL(address) {
-					return address, nil
-				}
-			}
-			if mp4 := p91MP4RE.FindStringSubmatch(decoded); mp4 != nil {
-				address := strings.TrimSpace(html.UnescapeString(mp4[1]))
-				if p91PlayableMediaURL(address) {
-					return address, nil
-				}
-			}
-		}
+//
+// 依次尝试：脚本里的加密串（多写法）→ 页面直出的 <source>/<video> → 整页 mp4/m3u8 兜底。
+func p91SourceFromPage(pageText, pageURL string) (string, error) {
+	candidates := make([]string, 0, 16)
+	for _, literal := range p91ScriptLiterals(pageText) {
+		candidates = append(candidates, p91CandidatesFromMarkup(p91PercentDecode(literal))...)
 	}
-	// 兜底：整页扫 mp4，排除站方广告占位域名。
-	for _, candidate := range p91MP4RE.FindAllString(pageText, -1) {
-		address := strings.TrimSpace(html.UnescapeString(candidate))
+	candidates = append(candidates, p91CandidatesFromMarkup(pageText)...)
+	for _, match := range p91MediaURLRE.FindAllString(pageText, -1) {
+		candidates = append(candidates, match)
+	}
+
+	blocked := false
+	for _, raw := range candidates {
+		address := p91NormalizeMediaURL(raw, pageURL)
+		if address == "" {
+			continue
+		}
+		if p91BlockedMediaHost(address) {
+			blocked = true
+			continue
+		}
 		if p91PlayableMediaURL(address) {
 			return address, nil
 		}
 	}
+	if blocked {
+		return "", errors.New("91porn 只返回了广告占位片，请重试")
+	}
 	return "", errors.New("91porn 未返回可播放地址")
 }
 
-// p91PlayableMediaURL 过滤广告占位片：广告域名、以及不带签名参数的裸 mp4。
+// p91ScriptLiterals 把页面里 strencode2/strencode1/strencode/unescape 调用的
+// 字符串参数全部取出来，单双引号、空白、换行都兼容 —— 站方不同模板写法不一。
+func p91ScriptLiterals(pageText string) []string {
+	lower := strings.ToLower(pageText)
+	markers := []string{"strencode2(", "strencode1(", "strencode(", "unescape("}
+	literals := make([]string, 0, 4)
+	for _, marker := range markers {
+		offset := 0
+		for {
+			index := strings.Index(lower[offset:], marker)
+			if index < 0 {
+				break
+			}
+			start := offset + index + len(marker)
+			offset = start
+			if literal, ok := p91ReadJSString(pageText, start); ok && literal != "" {
+				literals = append(literals, literal)
+			}
+		}
+	}
+	return literals
+}
+
+// p91ReadJSString 从 start 处读一个字面量字符串，跳过空白并支持转义引号。
+func p91ReadJSString(pageText string, start int) (string, bool) {
+	i := start
+	for i < len(pageText) {
+		switch pageText[i] {
+		case ' ', '\t', '\r', '\n':
+			i++
+			continue
+		}
+		break
+	}
+	if i >= len(pageText) || (pageText[i] != '"' && pageText[i] != '\'') {
+		return "", false
+	}
+	quote := pageText[i]
+	i++
+	begin := i
+	for i < len(pageText) {
+		if pageText[i] == '\\' {
+			i += 2
+			continue
+		}
+		if pageText[i] == quote {
+			return p91UnescapeJSString(pageText[begin:i]), true
+		}
+		i++
+	}
+	return "", false
+}
+
+// p91UnescapeJSString 处理 JS 字符串里的常见转义（站方有的模板会把引号转义后再塞进加密串）。
+func p91UnescapeJSString(raw string) string {
+	if !strings.Contains(raw, `\`) {
+		return raw
+	}
+	var builder strings.Builder
+	builder.Grow(len(raw))
+	for i := 0; i < len(raw); i++ {
+		if raw[i] != '\\' || i+1 >= len(raw) {
+			builder.WriteByte(raw[i])
+			continue
+		}
+		i++
+		builder.WriteByte(raw[i])
+	}
+	return builder.String()
+}
+
+// p91PercentDecode 模拟 JS 的 unescape()：支持 %XX 与 %uXXXX，
+// 遇到孤立的 % 原样保留（PathUnescape 会直接报错，这是早期取不到地址的隐患之一）。
+func p91PercentDecode(raw string) string {
+	buffer := make([]byte, 0, len(raw))
+	for i := 0; i < len(raw); i++ {
+		if raw[i] != '%' {
+			buffer = append(buffer, raw[i])
+			continue
+		}
+		if i+5 < len(raw) && (raw[i+1] == 'u' || raw[i+1] == 'U') {
+			if value, err := strconv.ParseUint(raw[i+2:i+6], 16, 32); err == nil {
+				buffer = append(buffer, []byte(string(rune(value)))...)
+				i += 5
+				continue
+			}
+		}
+		if i+2 < len(raw) {
+			high, okHigh := p91HexValue(raw[i+1])
+			low, okLow := p91HexValue(raw[i+2])
+			if okHigh && okLow {
+				buffer = append(buffer, high<<4|low)
+				i += 2
+				continue
+			}
+		}
+		buffer = append(buffer, raw[i])
+	}
+	return string(buffer)
+}
+
+func p91HexValue(char byte) (byte, bool) {
+	switch {
+	case char >= '0' && char <= '9':
+		return char - '0', true
+	case char >= 'a' && char <= 'f':
+		return char - 'a' + 10, true
+	case char >= 'A' && char <= 'F':
+		return char - 'A' + 10, true
+	}
+	return 0, false
+}
+
+// p91CandidatesFromMarkup 从一段 HTML 里按可靠性顺序取播放地址候选。
+func p91CandidatesFromMarkup(text string) []string {
+	candidates := make([]string, 0, 6)
+	for _, pattern := range []*regexp.Regexp{p91SourceTagRE, p91VideoTagRE, p91MediaURLRE} {
+		for _, match := range pattern.FindAllStringSubmatch(text, -1) {
+			if len(match) > 1 && strings.TrimSpace(match[1]) != "" {
+				candidates = append(candidates, match[1])
+			}
+		}
+	}
+	return candidates
+}
+
+// p91NormalizeMediaURL 解码实体、去掉包裹引号、把 `\/` 还原成 `/`，并按详情页地址补全相对路径。
+func p91NormalizeMediaURL(raw, pageURL string) string {
+	address := strings.TrimSpace(html.UnescapeString(raw))
+	address = strings.Trim(address, "\"'\\")
+	address = strings.ReplaceAll(address, "\\/", "/")
+	if address == "" || strings.ContainsAny(address, " \t\r\n") {
+		return ""
+	}
+	base, err := url.Parse(pageURL)
+	if err != nil || base.Scheme == "" {
+		base, _ = url.Parse(p91SiteURL + "/")
+	}
+	reference, err := url.Parse(address)
+	if err != nil {
+		return ""
+	}
+	resolved := base.ResolveReference(reference)
+	if resolved.Scheme != "http" && resolved.Scheme != "https" {
+		return ""
+	}
+	return resolved.String()
+}
+
+// p91PlayableMediaURL 只要是可播放的 MP4/HLS 地址就放行；
+// 站方 CDN（91p52.com 等）必须保留，不能按域名误杀。
 func p91PlayableMediaURL(address string) bool {
 	if !isProviderHTTPMediaURL(address) {
 		return false
 	}
 	lower := strings.ToLower(address)
-	for _, host := range []string{"91p52.com", "kwai.net", "cdn77.org"} {
-		if strings.Contains(lower, host) {
+	if strings.ContainsAny(lower, " \t\r\n") {
+		return false
+	}
+	for _, ext := range []string{".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".css", ".js"} {
+		if strings.Contains(lower, ext) {
 			return false
 		}
 	}
-	return true
+	return strings.Contains(lower, ".mp4") || strings.Contains(lower, ".m3u8")
+}
+
+// p91BlockedMediaHost 只拦明确的贴片广告域名与广告路径。
+func p91BlockedMediaHost(address string) bool {
+	lower := strings.ToLower(address)
+	for _, host := range p91AdMediaHosts {
+		if strings.Contains(lower, host) {
+			return true
+		}
+	}
+	return strings.Contains(lower, "/ads/") || strings.Contains(lower, "/advert")
 }
 
 // ---- 取流 ----
@@ -456,7 +630,7 @@ func (d *Downloader) resolveP91Media(ctx context.Context, task Task) (providerMe
 		if err != nil {
 			return providerMedia{}, err
 		}
-		fresh, err := p91SourceFromPage(pageText)
+		fresh, err := p91SourceFromPage(pageText, pageURL)
 		if err != nil {
 			return providerMedia{}, err
 		}
@@ -466,6 +640,7 @@ func (d *Downloader) resolveP91Media(ctx context.Context, task Task) (providerMe
 		URL:     address,
 		Referer: p91SiteURL + "/",
 		credentials: &providerMediaCredentials{
+			cookie:    p91Cookie,
 			referer:   p91SiteURL + "/",
 			userAgent: p91UserAgent,
 		},

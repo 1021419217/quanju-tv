@@ -75,7 +75,8 @@ func TestP91ParseCards(t *testing.T) {
 }
 
 func TestP91ParseDetailSource(t *testing.T) {
-	address, err := p91SourceFromPage(p91DetailFixture)
+	const pageURL = "https://91porn.com/view_video.php?viewkey=abc123def456"
+	address, err := p91SourceFromPage(p91DetailFixture, pageURL)
 	if err != nil {
 		t.Fatalf("解析失败: %v", err)
 	}
@@ -88,13 +89,89 @@ func TestP91ParseDetailSource(t *testing.T) {
 	}
 }
 
-func TestP91RejectAdPlaceholder(t *testing.T) {
-	if p91PlayableMediaURL("https://ccm.91p52.com/358999.mp4") {
-		t.Fatalf("广告占位域名不应通过")
+// 站方真实直链在自家 CDN（ccm.91p52.com）上，早期按域名误杀导致永远播不了。
+func TestP91AcceptSiteCDN(t *testing.T) {
+	page := `<video id="player_one"><script>document.write(strencode2("%3Csource%20src%3D%22https%3A%2F%2Fccm.91p52.com%2F358999.mp4%3Fst%3D7f3a%26f%3D91%22%20type%3D%22video%2Fmp4%22%3E"));</script></video>`
+	address, err := p91SourceFromPage(page, "https://91porn.com/view_video.php?viewkey=x")
+	if err != nil {
+		t.Fatalf("站方 CDN 直链被误杀: %v", err)
 	}
-	page := `<video><source src='https://ccm.91p52.com/358999.mp4' type='video/mp4'></video>`
-	if _, err := p91SourceFromPage(page); err == nil {
+	want := "https://ccm.91p52.com/358999.mp4?st=7f3a&f=91"
+	if address != want {
+		t.Fatalf("直链错误:\n got %s\nwant %s", address, want)
+	}
+}
+
+// 站方模板有单引号、换行、以及 unescape() 的变体写法。
+func TestP91SourceVariants(t *testing.T) {
+	cases := []struct {
+		name string
+		page string
+		want string
+	}{
+		{
+			name: "单引号+空白",
+			page: `<script>document.write(strencode2( '%3Csource%20src%3D%27https%3A%2F%2Fv9.91p52.com%2Fa.mp4%3Fst%3D1%27%3E' ));</script>`,
+			want: "https://v9.91p52.com/a.mp4?st=1",
+		},
+		{
+			name: "unescape写法",
+			page: `<script>document.write(unescape("%3Csource%20src%3D%22https%3A%2F%2Fv9.91p52.com%2Fb.mp4%22%3E"));</script>`,
+			want: "https://v9.91p52.com/b.mp4",
+		},
+		{
+			name: "页面直出source",
+			page: `<video id="player_one"><source src="https://v9.91p52.com/c.mp4?st=2" type="video/mp4"></video>`,
+			want: "https://v9.91p52.com/c.mp4?st=2",
+		},
+		{
+			name: "相对路径",
+			page: `<video><source src="/mp43/1252139.mp4"></video>`,
+			want: "https://91porn.com/mp43/1252139.mp4",
+		},
+		{
+			name: "hls地址",
+			page: `<video><source src="https://v9.91p52.com/d.m3u8?st=3"></video>`,
+			want: "https://v9.91p52.com/d.m3u8?st=3",
+		},
+	}
+	for _, item := range cases {
+		address, err := p91SourceFromPage(item.page, "https://91porn.com/view_video.php?viewkey=x")
+		if err != nil {
+			t.Fatalf("%s 解析失败: %v", item.name, err)
+		}
+		if address != item.want {
+			t.Fatalf("%s 直链错误:\n got %s\nwant %s", item.name, address, item.want)
+		}
+	}
+}
+
+// 加密串里可能出现孤立 % 或 %uXXXX，PathUnescape 会直接失败，这里必须容错。
+func TestP91PercentDecode(t *testing.T) {
+	if got := p91PercentDecode("%3Csource%20src%3D%22a.mp4%22%3E"); got != `<source src="a.mp4">` {
+		t.Fatalf("常规解码错误: %q", got)
+	}
+	if got := p91PercentDecode("100%25%20done"); got != "100% done" {
+		t.Fatalf("百分号解码错误: %q", got)
+	}
+	if got := p91PercentDecode("%u4e2d%u6587"); got != "中文" {
+		t.Fatalf("%%u 解码错误: %q", got)
+	}
+	if got := p91PercentDecode("50%off"); got != "50%off" {
+		t.Fatalf("孤立百分号不应报错: %q", got)
+	}
+}
+
+func TestP91RejectAdPlaceholder(t *testing.T) {
+	if !p91BlockedMediaHost("https://cdn.kwai.net/ads/x.mp4") {
+		t.Fatalf("广告域名应被识别")
+	}
+	page := `<video><source src='https://cdn.kwai.net/ad/1.mp4' type='video/mp4'></video>`
+	if _, err := p91SourceFromPage(page, "https://91porn.com/view_video.php?viewkey=x"); err == nil {
 		t.Fatalf("只有广告片时应报无可用地址")
+	}
+	if p91PlayableMediaURL("https://91porn.com/images/logo.png") {
+		t.Fatalf("图片不应判为可播放")
 	}
 }
 
