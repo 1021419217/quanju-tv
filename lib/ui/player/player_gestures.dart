@@ -516,7 +516,7 @@ class GestureHud extends StatelessWidget {
 class PlayerHoldGesture extends StatelessWidget {
   const PlayerHoldGesture({
     super.key,
-    required this.child,
+    this.child,
     this.onTapUp,
     this.onLongPressStart,
     this.onLongPressMoveUpdate,
@@ -528,7 +528,10 @@ class PlayerHoldGesture extends StatelessWidget {
   /// 又留一点余量避免正常点按被误判成长按。
   static const Duration holdDuration = Duration(milliseconds: 260);
 
-  final Widget child;
+  /// 三个播放页原本用的是无 child 的 GestureDetector（靠 behavior: opaque
+  /// 自己占满父区域），所以这里 child 必须可选；缺省时给一个占满容器的空盒，
+  /// 保持完全一致的命中范围。
+  final Widget? child;
   final GestureTapUpCallback? onTapUp;
   final GestureLongPressStartCallback? onLongPressStart;
   final GestureLongPressMoveUpdateCallback? onLongPressMoveUpdate;
@@ -562,7 +565,7 @@ class PlayerHoldGesture extends StatelessWidget {
               },
             ),
       },
-      child: child,
+      child: child ?? const SizedBox.expand(),
     );
   }
 }
