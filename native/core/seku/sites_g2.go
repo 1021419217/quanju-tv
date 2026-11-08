@@ -2952,7 +2952,7 @@ func init() {
 	// the jar's whos.tv, registered in sites_whos.go). The supjav*
 	// functions stay above, unregistered.
 	registerSite("yaguo", &siteImpl{
-		Key: "aipornx", Name: "AiPorn", DefaultCat: "home", HomeURL: "https://www.aipornx.cc/",
+		Key: "aipornx", Name: "AiPorn", DefaultCat: "home", HomeURL: "https://www.aipornx.cc/home/",
 		Categories: aipCategories,
 		Catalog:    aipCatalog,
 		Detail:     aipDetail,
