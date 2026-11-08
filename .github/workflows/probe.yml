@@ -1,0 +1,42 @@
+name: Probe site
+
+# 临时排障工作流：在 GitHub 云主机（海外 IP、干净网络）上抓站点真实页面，
+# 用来确认结构、分类入口与播放列表返回内容。用完即删。
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Probe 91porny
+        run: |
+          UA="Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
+          B="https://91porny.com"
+          echo "===== HOME"
+          curl -sSL -m 30 -A "$UA" "$B/video/index" -o home.html -w "http=%{http_code} bytes=%{size_download}\n"
+          echo "--- nav links"
+          grep -oE 'href="[^"]{1,120}"[^>]*>[^<]{1,24}<' home.html | sed 's/ class="[^"]*"//g' | head -60
+          echo "--- video paths"
+          grep -oE 'href="/video/[^"]*"' home.html | sort -u | head -30
+          echo "--- cate-ish"
+          grep -oiE 'href="[^"]*(cate|category|sort|tag)[^"]*"' home.html | sort -u | head -30
+          echo "===== DETAIL"
+          curl -sSL -m 30 -A "$UA" -e "$B/" "$B/video/view/e7f9b65d89f5238b6211" -o d.html -w "http=%{http_code} bytes=%{size_download}\n"
+          grep -oE 'data-src="[^"]*"' d.html | head -5
+          echo "--- title"
+          grep -oE '<h4 class="container-title[^"]*"[^>]*>[^<]*' d.html | head -2
+          SRC=$(grep -oE 'data-src="[^"]*"' d.html | head -1 | cut -d'"' -f2)
+          echo "SRC=$SRC"
+          echo "===== M3U8 curl"
+          curl -sSL -m 30 -A "$UA" -e "$B/video/view/e7f9b65d89f5238b6211" -D m.hdr "$SRC" -o p.m3u8 -w "http=%{http_code} bytes=%{size_download}\n"
+          head -12 m.hdr
+          echo "--- body"
+          head -20 p.m3u8
+          echo "===== M3U8 no-referer"
+          curl -sSL -m 30 -A "$UA" "$SRC" -o p2.m3u8 -w "http=%{http_code} bytes=%{size_download}\n"
+          head -12 p2.m3u8
