@@ -388,5 +388,23 @@ func (d *Downloader) resolveKissavMedia(ctx context.Context, task Task) (provide
 	if !strings.HasPrefix(playlist, "#EXTM3U") {
 		return providerMedia{}, errors.New("KISSAV 播放列表无效，请刷新详情后重试")
 	}
-	return providerMedia{URL: address, Playlist: playlist, Referer: pageURL}, nil
+	return providerMedia{
+		URL:      address,
+		Playlist: playlist,
+		Referer:  pageURL,
+		// 分片地址里的 auth_key 有过期时间（实测约 15 分钟）。一部片动辄
+		// 一小时，播到后半段整批分片会同时 403，播放器只会「突然卡死」。
+		// 这里给中转一个「重新取一份列表」的入口，交给它按分片路径换地址。
+		ReloadPlaylist: func(refreshCtx context.Context) (string, error) {
+			pageText, err := d.fetchProviderText(refreshCtx, pageURL, kissavBaseURL+"/")
+			if err != nil {
+				return "", err
+			}
+			fresh, err := kissavPlayerURL(pageText)
+			if err != nil {
+				return "", err
+			}
+			return d.fetchProviderText(refreshCtx, fresh, pageURL)
+		},
+	}, nil
 }

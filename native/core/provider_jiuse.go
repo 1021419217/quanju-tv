@@ -37,7 +37,8 @@ import (
 const (
 	jiuseBaseURL  = "https://91porny.com"
 	jiusePageSize = 24
-	// jiusePlayMinSegments：一条正常 HLS 至少这么多分片（占位列表只有 1 段）。
+	// jiusePlayMinSegments：达到这个分片数就一定是完整片单，不再看别的字段；
+	// 少于它的再看有没有 ENDLIST（站内十几秒的短片只有 1~2 段）。
 	jiusePlayMinSegments = 3
 )
 
@@ -172,7 +173,9 @@ var (
 	reJiuseSchemaDur = regexp.MustCompile(`"duration":\s*"PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?"`)
 	reJiuseVipLayer  = regexp.MustCompile(`class="vip-layer"`)
 	// 老卡片只写「作者: 名字」不带链接，新卡片才包一层 <a href="/author/…">。
-	reJiuseCardAuthPlain = regexp.MustCompile(`作者:\s*([^<\s][^<]{0,39})`)
+	// [^<\n] 不能放行换行：卡片里「作者:」后面若没有名字，\s* 会把下一行的
+	// 播放量、时间一起吞进来，作者名就成了一串乱七八糟的文字。
+	reJiuseCardAuthPlain = regexp.MustCompile(`作者:[ \t]*([^<\n][^<\n]{0,39})`)
 )
 
 func validJiuseID(id string) bool {
@@ -187,6 +190,18 @@ func validJiuseID(id string) bool {
 	return true
 }
 
+// jiuseDetailHead 截掉详情页下方的推荐位，只留「本片信息」那一段。
+//
+// 推荐位卡片与列表页同构（div.colVideoList），每张都带「作者: /author/…」。
+// 不截断就在整页里找作者，取到的永远是推荐位第一条的作者——真机上表现为
+// 「作者名对不上、点进去是别人的作品」。截断后这段至少要有 8KB，否则说明
+// 页面结构变了（第一张卡片就是整页容器），此时退回全文，保持原有行为。
+func jiuseDetailHead(pageText string) string {
+	if loc := reJiuseCardStart.FindStringIndex(pageText); loc != nil && loc[0] >= 8192 {
+		return pageText[:loc[0]]
+	}
+	return pageText
+}
 // validJiuseCategory 只认上面登记过的分类 slug（空字符串是「全部」）。
 func validJiuseCategory(category string) bool {
 	category = strings.TrimSpace(category)
@@ -474,21 +489,30 @@ func parseJiuseDetail(pageText, sourceID string) (Drama, []Chapter, error) {
 			cover = jiuseAbsoluteAddress(match[1])
 		}
 	}
+	// 详情页顶部那一段才是本片作者；页面下方还有一整屏推荐卡片，每个都写着
+	// 「作者: <a href="/author/…">」，在整页上找第一个「作者:」必然抓到推荐位里
+	// 的别人（实测每部片都会变成推荐位第一条的作者）。所以先切掉推荐位再解析。
+	head := jiuseDetailHead(pageText)
 	author, authorID := "", ""
-	if match := reJiuseCardAuth.FindStringSubmatch(pageText); match != nil {
+	// 本片作者区只有 <a href="/author/{slug}">，没有「作者:」前缀。
+	if match := reJiuseAuthorLink.FindStringSubmatch(head); match != nil {
 		authorID = strings.TrimSpace(match[1])
 		author = p91CleanText(match[2])
-	} else if match := reJiuseCardAuthPlain.FindStringSubmatch(pageText); match != nil {
-		author = p91CleanText(match[1])
 	}
-	// 详情页把作者放在 <a href="/author/{slug}"> 里，不带「作者:」前缀，
-	// 上面两条都对不上，于是作者名有了但点不动。这里补一条只认链接的兜底。
-	if authorID == "" {
+	if author == "" {
+		if match := reJiuseCardAuth.FindStringSubmatch(head); match != nil {
+			authorID = strings.TrimSpace(match[1])
+			author = p91CleanText(match[2])
+		} else if match := reJiuseCardAuthPlain.FindStringSubmatch(head); match != nil {
+			author = p91CleanText(match[1])
+		}
+	}
+	// 页面结构变了、顶部截断里什么都没有时，才退回整页找。此时宁可显示作者名，
+	// 也不要因为推荐位把作者认成别人。
+	if author == "" && authorID == "" {
 		if match := reJiuseAuthorLink.FindStringSubmatch(pageText); match != nil {
 			authorID = strings.TrimSpace(match[1])
-			if author == "" {
-				author = p91CleanText(match[2])
-			}
+			author = p91CleanText(match[2])
 		}
 	}
 	// 详情页整页里会带上样式表与推荐位的 vip-layer，按整页判断必然误判成 VIP
@@ -529,11 +553,21 @@ func jiusePlaylistUsable(playlist string) bool {
 		return true
 	}
 	segments := strings.Count(trimmed, ".ts") + strings.Count(trimmed, ".m4s")
+	if segments == 0 {
+		// 分片地址不带扩展名时按 EXTINF 条数兜底。
+		segments = strings.Count(trimmed, "#EXTINF:")
+	}
+	if segments <= 0 {
+		return false
+	}
 	if segments >= jiusePlayMinSegments {
 		return true
 	}
-	// 分片地址不带扩展名时按 EXTINF 条数兜底。
-	return strings.Count(trimmed, "#EXTINF:") >= jiusePlayMinSegments
+	// 一两段也可能是完整片子：站内大量十几秒的短片（实测时长 20 秒的片子
+	// 就是 3 段、16 秒的只有 2 段），早期按「少于 3 段即废」直接判死，
+	// 用户看到的就是「每条线路都提示分片不足(2 段)」。只要列表已经用
+	// ENDLIST 收尾，说明片源完整，交给播放器即可。
+	return strings.Contains(trimmed, "#EXT-X-ENDLIST")
 }
 
 // jiusePlaylistReason 给出「为什么判废」，直接写进报错里。
@@ -551,8 +585,10 @@ func jiusePlaylistReason(playlist string) string {
 		return "CDN 返回占位列表(1002)"
 	case strings.Contains(trimmed, "#EXT-X-STREAM-INF"):
 		return ""
+	case strings.Contains(trimmed, "#EXT-X-ENDLIST"):
+		return ""
 	default:
-		return fmt.Sprintf("分片不足(%d 段)", strings.Count(trimmed, "#EXTINF:"))
+		return fmt.Sprintf("分片不足(%d 段)，列表未收尾", strings.Count(trimmed, "#EXTINF:"))
 	}
 }
 
@@ -666,17 +702,25 @@ var (
 // ---- 作者主页 ----
 
 // validJiuseAuthorSlug 校验作者路径参数。站内作者地址是 /author/{slug}，
-// slug 只由字母、数字、- _ . 组成，带别的一律拒掉，避免把任意路径拼进请求。
+// 而 slug 就是作者显示名本身：除了 Judre / Mr.Smith 这类英文，还有
+// 「91大黄鸭」「粉柚映画」「时间会治愈一切」等中文名（实测 URL 直接是
+// /author/{中文}，服务端正常返回）。早期只放行 ASCII，等于把所有中文作者
+// 全判成「作者 ID 无效」，点名字根本进不去。
+//
+// 这里改成黑名单：只拦会破坏路径或造成注入的字符，其余一律交给 PathEscape。
 func validJiuseAuthorSlug(slug string) bool {
 	slug = strings.TrimSpace(slug)
 	if slug == "" || len(slug) > 96 {
 		return false
 	}
+	if strings.Contains(slug, "..") {
+		return false
+	}
 	for _, char := range slug {
 		switch {
-		case char >= 'a' && char <= 'z', char >= 'A' && char <= 'Z',
-			char >= '0' && char <= '9', char == '-', char == '_', char == '.':
-		default:
+		case char < 0x20, char == 0x7f:
+			return false
+		case char == '/', char == '\\', char == '?', char == '#', char == '%', char == '&', char == '=':
 			return false
 		}
 	}
@@ -706,6 +750,17 @@ func (d *Downloader) fetchJiuseAuthorPage(ctx context.Context, authorID string, 
 		return nil, false, err
 	}
 	items := parseJiuseCards(pageText, "")
+	// 作者页的卡片里，一部分「作者:」链接指向外站镜像（//jiuselu42.com/author/…），
+	// 解析不出站内 slug，点名字会没反应。这里是同一个作者的作品，直接用当前
+	// slug 补上，保证列表里每一张都能再点进作者主页。
+	for index := range items {
+		if items[index].AuthorID == "" {
+			items[index].AuthorID = authorID
+		}
+		if items[index].Author == "" {
+			items[index].Author = authorID
+		}
+	}
 	// 站方每页 24 条，取满即认为还有下一页。
 	return items, len(items) >= jiusePageSize, nil
 }

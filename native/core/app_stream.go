@@ -52,6 +52,11 @@ type nativeStreamSession struct {
 	// reload 让站源重新解析一次播放地址：91porn 的直链带时间戳签名，
 	// 播到一半签名过期时只能重新取一条，靠它接着播下去。
 	reload func(context.Context) (string, error)
+	// refreshPlaylist 让 HLS 源重新取一份带新签名的播放列表。分片签名过期时
+	// 上游会对整批分片回 403，只能靠它把地址换掉（见 nativeRefreshSegments）。
+	refreshPlaylist func(context.Context) (string, error)
+	// playlistRefreshes 是一次播放里已经刷新过几次播放列表，防止把详情页打爆。
+	playlistRefreshes int
 	// fallbackCursor 记录备用直链已经试到第几条，避免反复撞同一条死链。
 	fallbackCursor int
 	// reloads 是一次播放里已经重新解析过几次，防止详情页被反复打。
@@ -277,7 +282,7 @@ func (stream *nativeStreamServer) nativeOpen(media providerMedia, adBlock bool) 
 	}
 	token := hex.EncodeToString(tokenBytes)
 	ctx, cancel := context.WithCancel(providerMediaContext(context.Background(), media.credentials))
-	session := &nativeStreamSession{assets: map[string]nativeStreamAsset{}, referer: media.Referer, key: media.HLSKey, ctx: ctx, cancel: cancel, lastUsed: time.Now(), credentials: media.credentials, diagnosticID: nativeStreamID(token), adBlock: adBlock, hook: media.Hook, reload: media.Reload}
+	session := &nativeStreamSession{assets: map[string]nativeStreamAsset{}, referer: media.Referer, key: media.HLSKey, ctx: ctx, cancel: cancel, lastUsed: time.Now(), credentials: media.credentials, diagnosticID: nativeStreamID(token), adBlock: adBlock, hook: media.Hook, reload: media.Reload, refreshPlaylist: media.ReloadPlaylist}
 	if media.credentials != nil {
 		session.resilient = media.credentials.resilient
 	}
@@ -536,7 +541,14 @@ func (stream *nativeStreamServer) nativeServe(writer http.ResponseWriter, reques
 		return
 	}
 	upstream.Header.Set("User-Agent", userAgent)
-	upstream.Header.Set("Referer", session.referer)
+	// 91 的 CDN 认「像播放器」的请求：缺 Referer 直接掐连接（实测 http=000），
+	// 缺 Accept / identity 编码时部分节点只放行开头一小段。备用线路那条路径
+	// 早就带齐了，主路径反而漏了，表现成「第一次请求就断，换线都没机会」。
+	if session.referer != "" {
+		upstream.Header.Set("Referer", session.referer)
+	}
+	upstream.Header.Set("Accept", "*/*")
+	upstream.Header.Set("Accept-Encoding", "identity")
 	for _, name := range []string{"Range", "If-Range"} {
 		if value := request.Header.Get(name); value != "" {
 			upstream.Header.Set(name, value)
@@ -570,16 +582,33 @@ func (stream *nativeStreamServer) nativeServe(writer http.ResponseWriter, reques
 	// 续传只对会掐长连接的源有意义，而换线对所有源都必要——详情页给出的
 	// 第一条地址经常是死节点，不换就只能一直对着它重试。3.22 把两者绑在
 	// resilient 上，关掉续传时把换线也一起关了，直接导致「10 个 9 个播不出」。
+	// HLS 源（kissav 等）的分片签名会过期：播到一半时整批分片突然 403，
+	// 换线没用（同一份列表）、重新解析地址也没用（地址没变，变的是签名）。
+	// 只有重新取一份播放列表才能换到新签名，所以这一步排在换线之前。
 	if err != nil || (response != nil && response.StatusCode >= 400) {
-		if retry, retryRequest, retryAddress, retryErr := stream.nativeFetchWithFallback(ctx, request, session, fetchAddress); retryErr == nil {
-			if err != nil {
-				err = nil
-			} else {
+		recovered := false
+		if response != nil &&
+			(response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden) &&
+			session.refreshPlaylist != nil {
+			if retry, retryRequest, retryErr := stream.nativeRetryAfterRefresh(ctx, upstream, session, parts[1]); retryErr == nil {
 				_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 64<<10))
 				response.Body.Close()
+				response, upstream, fetchAddress = retry, retryRequest, retryRequest.URL.String()
+				err = nil
+				recovered = true
 			}
-			response, upstream, fetchAddress = retry, retryRequest, retryAddress
-			session.promoteAddress(parts[1], retryAddress)
+		}
+		if !recovered {
+			if retry, retryRequest, retryAddress, retryErr := stream.nativeFetchWithFallback(ctx, request, session, fetchAddress); retryErr == nil {
+				if err != nil {
+					err = nil
+				} else {
+					_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 64<<10))
+					response.Body.Close()
+				}
+				response, upstream, fetchAddress = retry, retryRequest, retryAddress
+				session.promoteAddress(parts[1], retryAddress)
+			}
 		}
 	}
 	if err != nil {

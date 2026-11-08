@@ -88,6 +88,17 @@ class MinePage extends StatelessWidget {
     onTap: () => _openHistory(context),
   );
 
+  /// 下载入口。用户反馈「点了下载，下完不知道去哪找」——下载卡片只在有任务时
+  /// 才醒目，任务一结束就只剩一行灰字，入口等于没有。这里做成常驻条目。
+  Widget _downloads(BuildContext context) => _MineEntry(
+    icon: Icons.download_rounded,
+    title: '下载',
+    subtitle: downloads.completed == 0
+        ? '已下载的剧集都在这里'
+        : '已下载 ${downloads.completed} 集 · ${_size(downloads.completedBytes)}',
+    onTap: () => _openDownloads(context),
+  );
+
   Widget _poster(
     BuildContext context,
     WatchEntry entry,
@@ -130,7 +141,10 @@ class MinePage extends StatelessWidget {
           const SizedBox(height: 6),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: _DownloadCard(downloads: downloads),
+            child: _DownloadCard(
+              downloads: downloads,
+              onTap: () => _openDownloads(context),
+            ),
           ),
         ],
         const SizedBox(height: 16),
@@ -139,6 +153,10 @@ class MinePage extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              if (store.canDownload) ...[
+                _downloads(context),
+                const SizedBox(height: 10),
+              ],
               _history(context),
               const SizedBox(height: 10),
               _live(context),
@@ -172,9 +190,16 @@ class MinePage extends StatelessWidget {
                 padding: sectionPadding,
               ),
               const SizedBox(height: 6),
-              _DownloadCard(downloads: downloads),
+              _DownloadCard(
+                downloads: downloads,
+                onTap: () => _openDownloads(context),
+              ),
             ],
             const SizedBox(height: 16),
+            if (store.canDownload) ...[
+              _downloads(context),
+              const SizedBox(height: 10),
+            ],
             _live(context),
             const SizedBox(height: 10),
             _settings(context),
@@ -304,6 +329,17 @@ class MinePage extends StatelessWidget {
                         onTap: () => openUsers(context, store),
                       ),
                     ),
+                    if (store.canDownload)
+                      Expanded(
+                        child: _TelevisionEntry(
+                          icon: Icons.download_rounded,
+                          title: '下载',
+                          subtitle: downloads.completed == 0
+                              ? '已下载的剧集都在这里'
+                              : '已下载 ${downloads.completed} 集',
+                          onTap: () => _openDownloads(context),
+                        ),
+                      ),
                     Expanded(
                       child: _TelevisionEntry(
                         icon: Icons.live_tv_rounded,
@@ -458,8 +494,9 @@ class _UserCard extends StatelessWidget {
 }
 
 class _DownloadCard extends StatelessWidget {
-  const _DownloadCard({required this.downloads});
+  const _DownloadCard({required this.downloads, required this.onTap});
   final DownloadOverview downloads;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -542,25 +579,43 @@ class _DownloadCard extends StatelessWidget {
               ),
               const Divider(height: 1, indent: 16, endIndent: 16),
             ],
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-              child: Row(
-                spacing: 12,
-                children: [
-                  Icon(
-                    Icons.download_rounded,
-                    size: 20,
-                    color: colors.onSurfaceVariant,
-                  ),
-                  Expanded(
-                    child: Text(
-                      downloads.completed == 0 && active == 0
-                          ? '还没有下载任务'
-                          : '已完成 ${downloads.completed} 集 · 占用 ${_size(downloads.completedBytes)}',
-                      style: secondary.copyWith(fontSize: 14),
+            InkWell(
+              onTap: onTap,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 14,
+                ),
+                child: Row(
+                  spacing: 12,
+                  children: [
+                    Icon(
+                      Icons.download_rounded,
+                      size: 20,
+                      color: colors.onSurfaceVariant,
                     ),
-                  ),
-                ],
+                    Expanded(
+                      child: Text(
+                        downloads.completed == 0 && active == 0
+                            ? '还没有下载任务'
+                            : '已完成 ${downloads.completed} 集 · 占用 ${_size(downloads.completedBytes)}',
+                        style: secondary.copyWith(fontSize: 14),
+                      ),
+                    ),
+                    Text(
+                      '查看',
+                      style: secondary.copyWith(
+                        fontSize: 13,
+                        color: colors.primary,
+                      ),
+                    ),
+                    Icon(
+                      Icons.chevron_right_rounded,
+                      size: 18,
+                      color: colors.onSurfaceVariant,
+                    ),
+                  ],
+                ),
               ),
             ),
           ],

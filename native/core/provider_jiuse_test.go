@@ -207,15 +207,54 @@ func TestJiuseCategoryValidation(t *testing.T) {
 }
 
 func TestJiuseAuthorSlugValidation(t *testing.T) {
-	for _, ok := range []string{"abc", "user_name-1", "a.b"} {
+	// 站内作者 slug 就是显示名，中文名必须放行（/author/91大黄鸭 实测可访问）。
+	for _, ok := range []string{"abc", "user_name-1", "a.b", "名字", "91大黄鸭", "粉柚映画", "Mr.Smith", "QAQ___"} {
 		if !validJiuseAuthorSlug(ok) {
 			t.Fatalf("%s 应合法", ok)
 		}
 	}
-	for _, bad := range []string{"", "  ", "a/b", "../x", "名字", strings.Repeat("a", 97)} {
+	for _, bad := range []string{"", "  ", "a/b", "../x", "a?b", "a#b", "a%b", "a&b", strings.Repeat("a", 97)} {
 		if validJiuseAuthorSlug(bad) {
 			t.Fatalf("%q 应被拒", bad)
 		}
+	}
+}
+
+// 详情页下方全是推荐卡片，每张都写「作者: <a href="/author/…">」。
+// 早期在整页上取第一个「作者:」，结果每部片的作者都变成推荐位第一条的作者。
+func TestJiuseDetailAuthorIgnoresRecommendations(t *testing.T) {
+	head := strings.Repeat("x", 9000) + `
+	<i class="fas fa-user"></i>
+	<a href="/author/Judre"> Judre </a>`
+	page := head + `
+	<div class="colVideoList">
+	  <a class="title" href="/video/view/e7f9b65d89f5238b6211">推荐片</a>
+	  <div class="text-muted">作者: <a class="text-dark" href="/author/ukaodazx">ukaodazx</a></div>
+	</div>`
+
+	if got := jiuseDetailHead(page); strings.Contains(got, "ukaodazx") {
+		t.Fatal("推荐位应被截断")
+	}
+	match := reJiuseAuthorLink.FindStringSubmatch(jiuseDetailHead(page))
+	if match == nil || strings.TrimSpace(match[1]) != "Judre" {
+		t.Fatalf("应解析出本片作者 Judre，实际 %v", match)
+	}
+}
+
+// 十几秒的短片只有 2 段，但有 ENDLIST，属于完整片单，不能判废。
+func TestJiusePlaylistUsableShortVod(t *testing.T) {
+	short := "#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:8\n" +
+		"#EXTINF:8.341667,\nindex0.ts\n#EXTINF:3.636967,\nindex1.ts\n#EXT-X-ENDLIST\n"
+	if !jiusePlaylistUsable(short) {
+		t.Fatal("2 段且带 ENDLIST 的短片应可用")
+	}
+	open := "#EXTM3U\n#EXTINF:8.0,\nindex0.ts\n"
+	if jiusePlaylistUsable(open) {
+		t.Fatal("没有 ENDLIST 且不足 3 段应判废")
+	}
+	placeholder := "#EXTM3U\n#EXTINF:6.0,\nindex0.ts?__vnotice=1002\n#EXT-X-ENDLIST\n"
+	if jiusePlaylistUsable(placeholder) {
+		t.Fatal("1002 占位列表必须判废")
 	}
 }
 

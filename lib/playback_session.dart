@@ -522,6 +522,20 @@ class PlaybackSession extends ChangeNotifier {
       ].join(','),
     );
     await platform.setProperty('network-timeout', '20');
+    if (!plan.local) {
+      // 在线播放再兜一层：站方 CDN 掐断长连接时，ffmpeg 自己按 Range 重连，
+      // 播放器不用把整条流交回给上层去做「自动恢复」。中转那边也有续传，
+      // 两层都开着才能覆盖「中转先断」和「播放器先断」两种情况。
+      await platform.setProperty(
+        'stream-lavf-o',
+        [
+          'reconnect=1',
+          'reconnect_streamed=1',
+          'reconnect_on_http_error=403,404,500,502,503',
+          'reconnect_delay_max=5',
+        ].join(','),
+      );
+    }
   }
 
   Future<void> play(

@@ -16,14 +16,14 @@ import (
 // 站方 CDN 掐得很勤（有的十几秒一次），次数太少等于没做；但也不能无限续，
 // 否则一个已经死掉的地址会一直挂着，播放器看到的是永远转圈。
 const (
-	nativeRelayMaxResumes  = 64
-	nativeRelayMaxDuration = 10 * time.Minute
+	nativeRelayMaxResumes  = 240
+	nativeRelayMaxDuration = 30 * time.Minute
 	// 连续这么多次续不上就认为这条链废了，换备用线路 / 重新解析。
 	nativeRelayFailBeforeSwitch = 2
 	// 服务器不支持 Range 时只能从头丢字节，丢得太多还不如换线路。
 	nativeRelayMaxSkip = 8 << 20
 	// 一次播放最多重新解析几次地址：签名过期要重新取，但不能把详情页打爆。
-	nativeRelayMaxReloads = 3
+	nativeRelayMaxReloads = 6
 )
 
 // nativeRelayIdleTimeout 是「多久没有新字节就认为这条连接已经僵死」。
@@ -206,18 +206,14 @@ func nativeRelayBackoff(resumes int) time.Duration {
 	return delay
 }
 
-// nativeRelaySwitch 找一条还能用的地址接管当前的断点：先备用直链，再重新解析。
-// 换成功会把新地址写回会话，后续的 Range 请求直接走新地址。
+// nativeRelaySwitch 找一条还能用的地址接管当前的断点。
+//
+// 顺序是「重新解析 → 备用直链」：备用直链和主链来自同一份详情页，签名是
+// 一起生成的，过期也是一起过期，断流时先试它们基本是白等；重新解析拿到的是
+// 刚签好的新地址，命中率最高。只有重新解析失败（详情页打不开 / 没给地址）
+// 才退回同一批备用直链。
 func (stream *nativeStreamServer) nativeRelaySwitch(ctx context.Context, upstream *http.Request, session *nativeStreamSession, assetKey, current string, offset int64) (*bufio.Reader, string, func(), error) {
 	var lastErr error
-	for _, candidate := range session.relayCandidates(current) {
-		reader, closer, err := stream.nativeResumeFrom(ctx, upstream, candidate, offset)
-		if err == nil {
-			session.promoteAddress(assetKey, candidate)
-			return reader, candidate, closer, nil
-		}
-		lastErr = err
-	}
 	if reissued, err := session.reloadAddress(ctx); err == nil && reissued != "" && reissued != current {
 		if reader, closer, resumeErr := stream.nativeResumeFrom(ctx, upstream, reissued, offset); resumeErr == nil {
 			session.promoteAddress(assetKey, reissued)
@@ -225,6 +221,14 @@ func (stream *nativeStreamServer) nativeRelaySwitch(ctx context.Context, upstrea
 		} else {
 			lastErr = resumeErr
 		}
+	}
+	for _, candidate := range session.relayCandidates(current) {
+		reader, closer, err := stream.nativeResumeFrom(ctx, upstream, candidate, offset)
+		if err == nil {
+			session.promoteAddress(assetKey, candidate)
+			return reader, candidate, closer, nil
+		}
+		lastErr = err
 	}
 	if lastErr == nil {
 		lastErr = errors.New("没有可用的备用线路")

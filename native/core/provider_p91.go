@@ -1288,12 +1288,16 @@ func (d *Downloader) p91MediaFor(address string, insecure bool, referer string) 
 			referer:     referer,
 			userAgent:   p91UserAgent,
 			insecureTLS: insecure,
-			// 3.17~3.21 在这里标记了可续传，让本地中转在断流处用 Range 重拉。
-			// 实测反而更差：站方 CDN 对「同一条带签名的直链发第二次 Range 请求」
-			// 大多直接回 403/416，续传救不回来，还把游客配额打得更凶，
-			// 表现就是「10 个里 9 个播不出」。3.15 那种纯直通（io.Copy）反而是
-			// 用户反馈「大部分都能播」的版本，所以这里关掉续传，让 mpv 自己重连。
-			resilient:  false,
+			// 站方 CDN 会主动掐长连接（跨境链路上尤其频繁），不续传时播放器
+			// 收到的就是「传输中断」，自动恢复也救不回来。
+			//
+			// 3.22 曾因「同一条带签名直链发第二次 Range 会 403/416」关掉过，
+			// 但 2026-11-09 在海外机房实测：同一条直链连续 Range、并发 4 条
+			// Range、全量 40MB 都正常（206 / 完整），416 只出现在 offset 已到
+			// 文件末尾时。所以续传本身没问题，重新打开；断流后的换线策略也
+			// 改成「先重新解析新签名，再试备用直链」，避免在一批同时过期的
+			// 旧地址上空转。
+			resilient:  true,
 			sendCookie: true,
 		},
 	}

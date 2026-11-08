@@ -27,6 +27,11 @@ type providerMedia struct {
 	// 91porn 的直链带时间戳签名（st 参数），播到一半签名过期就只能重新取；
 	// 只有实现了这个回调的站源会启用，其它源为 nil，传输路径完全不变。
 	Reload func(context.Context) (string, error)
+	// ReloadPlaylist 给 HLS 源用：分片地址里的签名会过期，播到一半时上游
+	// 开始成片地回 403。这里让站源重新取一份播放列表（新的签名），中转按
+	// 分片路径把旧地址换成新地址，播放器继续拉同一个本地地址即可。
+	// 没实现的源为 nil，传输路径完全不变。
+	ReloadPlaylist func(context.Context) (string, error)
 	// QualityOptions 是站源直接给出的可选清晰度档位（如 1080/720/540/480/360）。
 	// 番茄这类「按档位分别缓存」的源走这个字段，避免为了列档位而伪造多条线路。
 	QualityOptions []int

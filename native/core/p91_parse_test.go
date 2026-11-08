@@ -459,9 +459,10 @@ func TestP91ResolveReturnsDetailAddressInstantly(t *testing.T) {
 	if media.URL != "https://ccm.91p52.com/1.mp4?st=x" {
 		t.Fatalf("地址错误: %s", media.URL)
 	}
-	// 3.17~3.21 走过续传，但站方 CDN 对同一签名地址的二次 Range 请求大多
-	// 直接 403/416，续传反而把「大部分能播」拖成「9/10 播不出」。回到直通。
-	if media.credentials == nil || media.credentials.resilient {
-		t.Fatalf("91porn 不该再标记续传")
+	// 3.30 重新打开续传：海外机房实测同一条直链连续 Range、并发 Range、全量
+	// 40MB 都是 206/完整，此前的 403 结论不成立。站方 CDN 会掐长连接，
+	// 不续传播放器收到的就是「传输中断」。
+	if media.credentials == nil || !media.credentials.resilient {
+		t.Fatalf("91porn 应标记为可续传")
 	}
 }
