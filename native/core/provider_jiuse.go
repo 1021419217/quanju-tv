@@ -307,7 +307,12 @@ func parseJiuseDetail(pageText, sourceID string) (Drama, []Chapter, error) {
 }
 
 // jiusePlaylistUsable 判断播放列表是真片单还是 CDN 的占位。
-// 占位列表的特征：只有一个分片且带 __vnotice（1002 = 资源不可用）。
+// 占位列表的特征：单分片 + 分片地址带 __vnotice=1002（「视频资源暂不可用」）。
+//
+// 注意两种情况都不能算废：
+//   - 多码率主列表（#EXT-X-STREAM-INF）：里面只有子列表地址、没有 .ts 分片，
+//     早期按「分片数 < 3」判断会把整条线路误杀，真机表现就是「所有线路都不可用」；
+//   - 分片用无扩展名路径的站点（这里九色不用，但别写死）。
 func jiusePlaylistUsable(playlist string) bool {
 	trimmed := strings.TrimSpace(strings.TrimPrefix(playlist, "\ufeff"))
 	if !strings.HasPrefix(trimmed, "#EXTM3U") {
@@ -316,12 +321,66 @@ func jiusePlaylistUsable(playlist string) bool {
 	if strings.Contains(trimmed, "__vnotice") {
 		return false
 	}
+	// 主列表：能列出子列表就说明 CDN 认了这次请求，交给播放器继续拉。
+	if strings.Contains(trimmed, "#EXT-X-STREAM-INF") {
+		return true
+	}
 	segments := strings.Count(trimmed, ".ts") + strings.Count(trimmed, ".m4s")
-	return segments >= jiusePlayMinSegments
+	if segments >= jiusePlayMinSegments {
+		return true
+	}
+	// 分片地址不带扩展名时按 EXTINF 条数兜底。
+	return strings.Count(trimmed, "#EXTINF:") >= jiusePlayMinSegments
+}
+
+// jiusePlaylistReason 给出「为什么判废」，直接写进报错里。
+// 真机上用户只能看到一行提示，靠它才能判断是占位、空列表还是别的。
+func jiusePlaylistReason(playlist string) string {
+	trimmed := strings.TrimSpace(strings.TrimPrefix(playlist, "\ufeff"))
+	switch {
+	case !strings.HasPrefix(trimmed, "#EXTM3U"):
+		head := strings.TrimSpace(strings.SplitN(trimmed, "\n", 2)[0])
+		if len(head) > 40 {
+			head = head[:40]
+		}
+		return "返回的不是播放列表(" + head + ")"
+	case strings.Contains(trimmed, "__vnotice"):
+		return "CDN 返回占位列表(1002)"
+	case strings.Contains(trimmed, "#EXT-X-STREAM-INF"):
+		return ""
+	default:
+		return fmt.Sprintf("分片不足(%d 段)", strings.Count(trimmed, "#EXTINF:"))
+	}
 }
 
 // jiusePlayLine 是站点给的线路。空字符串是详情页默认线路。
 var jiusePlayLines = []string{"", "line1", "line2", "line3"}
+
+// jiusePlaylist 取一条线路的播放列表并校验。
+//
+// 必须走 fetchMediaPlaylist：它带浏览器请求头（Accept */*、Sec-Fetch-Mode/Dest）、
+// 按「播放页 → 站点根 → CDN 自身域」逐级降级 Referer，并且会换 Chrome 指纹重试。
+// 早期这里用的是详情页抓取（catalog）通道，指纹和请求头都是错的，CDN 一律回
+// 200 的占位列表——真机上就是「每条线路都提示暂不可用」。
+func (d *Downloader) jiusePlaylist(ctx context.Context, address, pageURL string) (string, string, error) {
+	playlistCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	defer cancel()
+	playlist, finalURL, err := d.fetchMediaPlaylist(playlistCtx, address, pageURL)
+	if err != nil {
+		return "", "", err
+	}
+	if !jiusePlaylistUsable(playlist) {
+		return "", "", errors.New(jiusePlaylistReason(playlist))
+	}
+	return strings.TrimSpace(strings.TrimPrefix(playlist, "\ufeff")), finalURL, nil
+}
+
+func jiuseLineLabel(line string) string {
+	if line == "" {
+		return "默认线路"
+	}
+	return line
+}
 
 func (d *Downloader) resolveJiuseMedia(ctx context.Context, task Task) (providerMedia, error) {
 	source, sourceID, valid := splitProviderDramaID(task.DramaID)
@@ -342,7 +401,7 @@ func (d *Downloader) resolveJiuseMedia(ctx context.Context, task Task) (provider
 		candidates = append(candidates, address)
 	}
 
-	var lastErr error
+	var reasons []string
 	for index, line := range jiusePlayLines {
 		if budget.Err() != nil {
 			break
@@ -357,37 +416,38 @@ func (d *Downloader) resolveJiuseMedia(ctx context.Context, task Task) (provider
 			}
 			pageText, err := d.fetchProviderText(budget, lineURL, pageURL)
 			if err != nil {
-				lastErr = err
+				reasons = append(reasons, jiuseLineLabel(line)+": "+publicError(err).Error())
 				continue
 			}
 			address, _ = jiusePlayerAddress(pageText)
 		}
 		if address == "" {
+			reasons = append(reasons, jiuseLineLabel(line)+": 详情页未给出地址")
 			continue
 		}
-		// 播放列表本身很小，单独给短超时：拿不到就当这条线不通。
-		playlistCtx, playlistCancel := context.WithTimeout(budget, 8*time.Second)
-		playlist, err := d.fetchProviderText(playlistCtx, address, pageURL)
-		playlistCancel()
+		playlist, finalURL, err := d.jiusePlaylist(budget, address, pageURL)
 		if err != nil {
-			lastErr = err
+			reasons = append(reasons, jiuseLineLabel(line)+": "+publicError(err).Error())
 			continue
 		}
-		if !jiusePlaylistUsable(playlist) {
-			// CDN 回的是「资源不可用 / 地址已失效」占位，换下一条线路。
-			lastErr = errors.New("九色当前线路暂不可用")
-			continue
+		if finalURL == "" {
+			finalURL = address
 		}
 		return providerMedia{
-			URL:      address,
-			Playlist: strings.TrimSpace(strings.TrimPrefix(playlist, "\ufeff")),
+			URL:      finalURL,
+			Playlist: playlist,
 			Referer:  pageURL,
+			credentials: &providerMediaCredentials{
+				referer:   pageURL,
+				userAgent: userAgent,
+			},
 		}, nil
 	}
-	if lastErr == nil {
-		lastErr = errors.New("九色没有可用的播放线路")
+	if len(reasons) == 0 {
+		reasons = append(reasons, "没有可用的播放线路")
 	}
-	return providerMedia{}, fmt.Errorf("九色取流失败：%v", lastErr)
+	// 四条线全废时把每条的原因带上，用户截图就能直接定位是哪一环被挡。
+	return providerMedia{}, fmt.Errorf("九色取流失败：%s", strings.Join(reasons, "；"))
 }
 
 var (

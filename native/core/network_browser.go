@@ -81,7 +81,10 @@ func (transport *huangguoBrowserTransport) matches(request *http.Request) bool {
 	if after {
 		return true
 	}
-	return browserSuffixHost(host)
+	if browserSuffixHost(host) {
+		return true
+	}
+	return browserFingerprintReferer(request)
 }
 
 // browserFingerprintSuffixes 是「媒体 CDN 按 TLS 指纹拦截」的域名后缀。
@@ -91,6 +94,51 @@ func (transport *huangguoBrowserTransport) matches(request *http.Request) bool {
 // 是同一类反爬（按 JA3/JA4 拒绝），所以这里也交给 Chrome 150 指纹客户端。
 // 主站 91porn.com 不在列表里：它现在能出列表，换指纹反而可能触发验证页。
 var browserFingerprintSuffixes = []string{"91p52.com"}
+
+// browserFingerprintReferers 是「片源域名会换、但播放页固定」的站点。
+//
+// 91porn 的直链早期落在 *.91p52.com，2026 年起换到 la.btc620.com、ccm.91p52.com
+// 等一批镜像；九色（91porny.com）的片源在 cdn2.jiuse3.cloud。这些 CDN 全按
+// ClientHello 指纹放行：普通 Go 客户端要么被 RST，要么收到 200 的占位内容
+// （九色是单分片 6 秒 + __vnotice=1002）。域名一批批换，硬编码后缀永远追不上，
+// 所以改成按 Referer 认站：只要请求来自这两个播放页，媒体请求一律走 Chrome 指纹。
+//
+// 主站自身（91porn.com / 91porny.com 的 HTML 页面）不在此列——它们用标准传输
+// 就能出页面，换指纹反而可能触发验证页。
+var browserFingerprintReferers = []string{"91porn.com", "91porny.com"}
+
+func browserFingerprintReferer(request *http.Request) bool {
+	if request == nil || request.URL == nil {
+		return false
+	}
+	target := strings.ToLower(request.URL.Hostname())
+	referer := strings.TrimSpace(request.Header.Get("Referer"))
+	if referer == "" {
+		return false
+	}
+	parsed, err := url.Parse(referer)
+	if err != nil || parsed.Host == "" {
+		return false
+	}
+	from := strings.ToLower(parsed.Hostname())
+	matched := false
+	for _, suffix := range browserFingerprintReferers {
+		if from == suffix || strings.HasSuffix(from, "."+suffix) {
+			matched = true
+			break
+		}
+	}
+	if !matched {
+		return false
+	}
+	// 同一个站的主站页面请求保持标准传输。
+	for _, suffix := range browserFingerprintReferers {
+		if target == suffix || strings.HasSuffix(target, "."+suffix) {
+			return false
+		}
+	}
+	return true
+}
 
 func browserSuffixHost(host string) bool {
 	for _, suffix := range browserFingerprintSuffixes {

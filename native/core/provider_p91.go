@@ -1157,6 +1157,23 @@ func (d *Downloader) resolveP91Media(ctx context.Context, task Task) (providerMe
 	if sourceID == "" || strings.ContainsAny(sourceID, "/?#& ") {
 		return providerMedia{}, errors.New("91porn 播放请求缺少有效的视频 ID")
 	}
+	// 借九色取流（细节见 provider_p91_jiuse.go）。三种情况才走：
+	// 91 没给地址 / 地址签名全空 / 刚刚播失败过。
+	// 九色拿不到就继续走下面的 91 原逻辑，行为不变。
+	if !p91JiuseBlocked() {
+		needJiuse := len(candidates) == 0 || p91JiuseDegraded()
+		for _, candidate := range candidates {
+			if p91MediaSignatureMissing(candidate) {
+				needJiuse = true
+				break
+			}
+		}
+		if needJiuse {
+			if media, err := d.p91JiuseMedia(ctx, sourceID); err == nil && strings.TrimSpace(media.URL) != "" {
+				return media, nil
+			}
+		}
+	}
 	// 详情页已经解析出地址：直接起播，和笔盒一样不再多发一个请求。
 	// 这里连域名探测都不能做——探测本身也是一个网络请求。
 	if len(candidates) > 0 {
@@ -1294,20 +1311,34 @@ func (d *Downloader) p91Reload(ctx context.Context, viewkey string) (string, err
 	pageURL := d.p91BaseURL(ctx) + "/view_video.php?viewkey=" + url.QueryEscape(viewkey)
 	if pageText, err := d.p91Get(ctx, pageURL); err == nil {
 		if candidates, _ := p91MediaCandidates(pageText, pageURL); len(candidates) > 0 {
-			return candidates[0], nil
+			return p91ReloadResult(candidates[0]), nil
 		}
 	}
 	// 详情页这次没给出地址，换一套游客身份再要一次。
 	p91ResetGuest()
 	pageText, err := d.p91Get(ctx, pageURL)
 	if err != nil {
+		p91MarkP91Failure()
 		return "", err
 	}
 	candidates, _ := p91MediaCandidates(pageText, pageURL)
 	if len(candidates) == 0 {
+		p91MarkP91Failure()
 		return "", errors.New("91porn 重新解析未取到播放地址")
 	}
-	return candidates[0], nil
+	return p91ReloadResult(candidates[0]), nil
+}
+
+// p91ReloadResult 记录这次重新解析的结果，决定下一次起播走直链还是借九色。
+// 拿到的地址如果签名全空，站方不会放行——保持降级状态，下次直接去九色，
+// 别让用户再白转一圈。
+func p91ReloadResult(address string) string {
+	if p91MediaSignatureMissing(address) {
+		p91MarkP91Failure()
+	} else {
+		p91ClearP91Failure()
+	}
+	return address
 }
 
 // p91Probe 确认直链真的能出流。
