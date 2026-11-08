@@ -55,7 +55,7 @@ func nativeSourceSupportsSearch(source string) bool {
 	switch canonicalProviderSource(source) {
 	case sourceHongguo, sourceHuangju, sourceYeguo, sourceDSD, sourceSorani,
 		sourceGuipian, sourceHanxiaoquan, sourceA123, sourceIkanbot, sourceFanqie,
-		sourceXChina, sourceTheporny, sourceJinguoDuanju, sourceJinguo, sourceHeitao:
+		sourceXChina, sourceXChinaLive, sourceTheporny, sourceJinguoDuanju, sourceJinguo, sourceHeitao:
 		return true
 	}
 	if isDuanjuProviderSource(source) {
@@ -156,6 +156,14 @@ func (engine *nativeEngine) nativeSearchSource(ctx context.Context, source, quer
 		items, more, err = d.fetchIkanbotCatalogPage(ctx, page, "", query)
 	case sourceXChina:
 		items, more, err = d.fetchXChinaCatalogPage(ctx, page, "", query)
+	case sourceXChinaLive:
+		// 与 xchina 共用 /searchSevenVideos，结果改挂到实时源前缀，
+		// 保证详情/取流能按 xchina-live 分派。
+		items, more, err = d.fetchXChinaCatalogPage(ctx, page, "", query)
+		for index := range items {
+			items[index].Source = sourceXChinaLive
+			items[index].ID = providerDramaID(sourceXChinaLive, items[index].SourceID)
+		}
 	case sourceTheporny:
 		items, more, err = d.fetchThepornyCatalogPage(ctx, page, "", query)
 	case sourceJinguoDuanju:
