@@ -166,6 +166,14 @@ var nativePlaylistURI = regexp.MustCompile(`URI="([^"]+)"`)
 // 承认这批地址不可用，把时间留给「重新解析」。
 const nativeRelayFallbackBudget = 6 * time.Second
 
+// nativeHTMLResponse 判断上游是不是把网页当成媒体返回了。
+func nativeHTMLResponse(response *http.Response) bool {
+	if response == nil {
+		return false
+	}
+	return strings.HasPrefix(strings.ToLower(response.Header.Get("Content-Type")), "text/html")
+}
+
 // nativeUpstreamStatus 表示上游用状态码明确拒绝（403 多半是签名过期）。
 type nativeUpstreamStatus struct{ status int }
 
@@ -203,6 +211,14 @@ func (stream *nativeStreamServer) nativeFetchWithFallback(ctx context.Context, r
 			_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 64<<10))
 			response.Body.Close()
 			return nil, upstream, &nativeUpstreamStatus{status: response.StatusCode}
+		}
+		// 签名过期时 91 的 CDN 先 302、跟随后给一个 200 的 HTML。客户端默认
+		// 跟随重定向，所以这里看到的是「200 + text/html」。把它当成功透传给
+		// 播放器，播放器只会报解码失败，也永远不会触发换线/重解析。
+		if nativeHTMLResponse(response) {
+			_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 32<<10))
+			response.Body.Close()
+			return nil, upstream, &nativeUpstreamStatus{status: http.StatusBadGateway}
 		}
 		return response, upstream, nil
 	}
