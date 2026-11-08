@@ -62,6 +62,9 @@ type Downloader struct {
 	rankings              rankingCache
 	cfg                   Config
 	client                *http.Client
+	baseTransport         *http.Transport
+	compatOnce            sync.Once
+	compatClient          *http.Client
 	huangdouDetails       map[string]huangdouDetailEntry
 	huangdouDetailPending map[string]*huangdouDetailCall
 	ikanbotLineCache      map[string]ikanbotLineEntry
@@ -322,6 +325,9 @@ func newNativeEngine(directory string) (*nativeEngine, error) {
 	// "tls: failed to verify certificate: x509: certificate signed by unknown
 	// authority"。打包 CA 在此提供信任锚；其余平台只是多追加一份，行为不变。
 	transport.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: systemCertPoolWithBundle()}
+	// 留一份基础传输的引用：站方掐断 TLS 时要用它派生一套 TLS1.2+HTTP1.1
+	// 的兼容客户端重试（见 network_compat.go）。
+	d.baseTransport = transport
 	// 连接池给足：首页会同时向十几个站源要目录/海报，8 条空闲连接每源不够用，
 	// 反复新建 TLS 握手是「切分类要等一两秒」的主要来源。24 条足够覆盖单源突发。
 	transport.MaxIdleConns = 256

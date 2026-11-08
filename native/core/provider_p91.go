@@ -430,12 +430,17 @@ func parseP91Cards(pageText, category string) []Drama {
 		}
 		cards = append(cards, block.html)
 	}
-	if len(cards) == 0 && (len(blocks) == 0 || layoutColumn) {
+	if len(cards) == 0 {
 		// 兜底：站方偶尔调 class，主路径整页不命中时按 viewkey 位置开窗，
-		// 保证列表不会直接空白。只有「整页没切出卡片」或「切出来的全是内容列」
-		// 时启用，避免把刚刚过滤掉的混淆卡片又捡回来。
+		// 保证列表不会直接空白。只要过滤后一张都不剩就启用 —— 作者主页
+		// 曾因为「切出了卡片但全被当成混淆卡片」而整页空白。
 		cards = p91FallbackWindows(pageText)
 	}
+	return p91ItemsFromCards(cards, category)
+}
+
+// p91ItemsFromCards 把卡片 HTML 片段解析成剧集条目。
+func p91ItemsFromCards(cards []string, category string) []Drama {
 	items := make([]Drama, 0, len(cards))
 	seen := make(map[string]bool, len(cards))
 	categoryName := p91CategoryName(category)
@@ -1347,21 +1352,38 @@ func (d *Downloader) fetchP91AuthorPage(ctx context.Context, uid string, page in
 	if page < 1 {
 		page = 1
 	}
-	address := p91SiteURL + "/uvideos.php?UID=" + url.QueryEscape(uid) + "&type=public&page=" + fmt.Sprint(page)
-	pageText, err := d.p91Get(ctx, address)
-	if err != nil {
-		return nil, false, err
+	base := p91SiteURL + "/uvideos.php?UID=" + url.QueryEscape(uid) + "&page=" + fmt.Sprint(page)
+	// 作者页有三套渲染（公开列表 / basic 视图 / 不带 type 参数）。站方按游客
+	// 身份随机给其中一套，单一路径经常只拿到作者资料、没有视频列表 —— 这就是
+	// 「每个作者点进去都是空」的根因。逐个试，谁先解析出作品就用谁。
+	addresses := []string{
+		base + "&type=public",
+		base + "&type=public&viewtype=basic",
+		base,
 	}
-	items := parseP91Cards(pageText, "")
-	if len(items) == 0 {
-		// 部分作者页只在 basic 视图下输出卡片列表（默认视图是另一套模板）。
-		if alt, altErr := d.p91Get(ctx, address+"&viewtype=basic"); altErr == nil {
-			items = parseP91Cards(alt, "")
+	var lastErr error
+	for _, address := range addresses {
+		pageText, err := d.p91Get(ctx, address)
+		if err != nil {
+			lastErr = err
+			continue
 		}
+		items := parseP91Cards(pageText, "")
+		if len(items) == 0 {
+			// 该套模板的 div/well 结构对不上时，直接按 viewkey 开窗兜底。
+			items = p91ItemsFromCards(p91FallbackWindows(pageText), "")
+		}
+		if len(items) == 0 {
+			continue
+		}
+		for index := range items {
+			// 作者页里每条作品都属于同一个作者，补上 UID，点进去还能再回来。
+			items[index].AuthorID = uid
+		}
+		return items, len(items) >= 8, nil
 	}
-	for index := range items {
-		// 作者页里每条作品都属于同一个作者，补上 UID，点进去还能再回来。
-		items[index].AuthorID = uid
+	if lastErr != nil {
+		return nil, false, lastErr
 	}
-	return items, len(items) >= 8, nil
+	return nil, false, nil
 }

@@ -27,12 +27,16 @@ const (
 )
 
 // nativeRelayIdleTimeout 是「多久没有新字节就认为这条连接已经僵死」。
-// 站方 CDN 有时既不断开也不发数据，不主动断开就只能一直转圈。10 秒是折中：
+// 站方 CDN 有时既不断开也不发数据，不主动断开就只能一直转圈。15 秒是折中：
 // 短于播放器 20 秒的 network-timeout，长于跨境慢节点的正常首包间隔。
-const nativeRelayIdleTimeout = 10 * time.Second
+const nativeRelayIdleTimeout = 15 * time.Second
 
 // nativeIdleReader 给上游响应体加一个空闲看门狗：连续 timeout 没有读到字节就
 // 关掉连接，让阻塞中的 Read 立刻返回错误，交给续传循环重连。
+//
+// 注意计时只在「已经读到过字节」之后才开始：首字节本来就要等 CDN 建连 + 排队，
+// 3.20 从创建时就起 10 秒倒计时，慢节点上一个字节都没来就被判死，表现成
+// 「刚才能播的这会儿一直转圈」。首包超时交给传输层的 ResponseHeaderTimeout。
 type nativeIdleReader struct {
 	body    io.ReadCloser
 	timeout time.Duration
@@ -44,23 +48,33 @@ func newNativeIdleReader(body io.ReadCloser) *nativeIdleReader {
 }
 
 func newNativeIdleReaderWithTimeout(body io.ReadCloser, timeout time.Duration) *nativeIdleReader {
-	reader := &nativeIdleReader{body: body, timeout: timeout}
-	reader.timer = time.AfterFunc(reader.timeout, func() { _ = body.Close() })
-	return reader
+	return &nativeIdleReader{body: body, timeout: timeout}
 }
 
 func (reader *nativeIdleReader) Read(buffer []byte) (int, error) {
-	reader.timer.Reset(reader.timeout)
-	return reader.body.Read(buffer)
+	if reader.timer == nil {
+		reader.timer = time.AfterFunc(reader.timeout, func() { _ = reader.body.Close() })
+	} else {
+		reader.timer.Reset(reader.timeout)
+	}
+	n, err := reader.body.Read(buffer)
+	if n > 0 && reader.timer != nil {
+		reader.timer.Reset(reader.timeout)
+	}
+	return n, err
 }
 
 func (reader *nativeIdleReader) Close() error {
-	reader.timer.Stop()
+	if reader.timer != nil {
+		reader.timer.Stop()
+	}
 	return reader.body.Close()
 }
 
 func (reader *nativeIdleReader) stop() {
-	reader.timer.Stop()
+	if reader.timer != nil {
+		reader.timer.Stop()
+	}
 }
 
 // nativeRelayBody 把上游媒体流转发给播放器，并在上游掐断时从断点续拉。

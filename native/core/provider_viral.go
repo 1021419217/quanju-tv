@@ -65,6 +65,9 @@ var (
 	reViralOgImage   = regexp.MustCompile(`(?is)property="og:image"[^>]*content="([^"]+)"`)
 	reViralVideoURL  = regexp.MustCompile(`video_url:\s*'([^']+)'`)
 	reViralAltURL    = regexp.MustCompile(`video_alt_url:\s*'([^']+)'`)
+	// KVS 模板把 1080p 放在 video_alt_url2，部分站还有 video_alt_url3（4K）。
+	reViralAlt2URL = regexp.MustCompile(`video_alt_url2:\s*'([^']+)'`)
+	reViralAlt3URL = regexp.MustCompile(`video_alt_url3:\s*'([^']+)'`)
 	reViralVideoID   = regexp.MustCompile(`(?m)^\s*video_id:\s*'(\d+)'`)
 	reViralJSONLD    = regexp.MustCompile(`"duration":\s*"PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?"`)
 	reViralSlugClean = regexp.MustCompile(`[^a-z0-9\-]+`)
@@ -268,10 +271,11 @@ func viralCategoriesForSource() []nativeCategory {
 	return viralCategories
 }
 
-// viralPlayURL 从详情页 flashvars 里挑地址：优先 720p（video_alt_url），
-// 没有再退回 480p（video_url）。两者都是成品 mp4，302 到自家 CDN。
+// viralPlayURL 从详情页 flashvars 里挑地址，按清晰度从高到低取：
+// video_alt_url3（4K）→ video_alt_url2（1080p）→ video_alt_url（720p）→ video_url（480p）。
+// 全是成品 mp4，302 到自家 CDN，支持 Range。
 func viralPlayURL(pageText string) string {
-	for _, pattern := range []*regexp.Regexp{reViralAltURL, reViralVideoURL} {
+	for _, pattern := range []*regexp.Regexp{reViralAlt3URL, reViralAlt2URL, reViralAltURL, reViralVideoURL} {
 		if match := pattern.FindStringSubmatch(pageText); match != nil {
 			address := strings.TrimSpace(strings.ReplaceAll(match[1], "&amp;", "&"))
 			if isProviderHTTPMediaURL(address) {

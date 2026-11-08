@@ -491,6 +491,16 @@ func (d *Downloader) fetchProviderRequest(ctx context.Context, rawURL, referer s
 			}
 			resp, err := d.doCatalogRequestWithTimeout(req, timeout)
 			if err != nil {
+				// 站方 WAF 或中间设备直接掐断 TLS 时，Go 看到的是 EOF/reset，
+				// 浏览器却能打开。用 TLS1.2+HTTP1.1 的兼容客户端补一次再判断，
+				// 只对 GET 生效（POST 的 body 已被消费）。
+				if payload == nil && providerTransportBroken(err) {
+					if retryResp, retryErr := d.doCompatCatalogRequest(req, timeout); retryErr == nil {
+						resp, err = retryResp, nil
+					}
+				}
+			}
+			if err != nil {
 				lastErr = err
 				var backoff *requestBackoff
 				if errors.As(err, &backoff) {

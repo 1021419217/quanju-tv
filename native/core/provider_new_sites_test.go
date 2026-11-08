@@ -86,6 +86,11 @@ func TestViralPlayURLPrefersHD(t *testing.T) {
 	if !strings.Contains(got, "_720p.mp4") {
 		t.Fatalf("没有优先高清: %s", got)
 	}
+	// 有 1080p 时必须优先 1080p：video_alt_url2 是 KVS 的最高清档。
+	page1080 := `var flashvars = { video_url: 'https://viralxxxporn.com/zh/get_file/3/a/1/2/2.mp4/?v-acctoken=x', video_alt_url: 'https://viralxxxporn.com/zh/get_file/3/b/1/2/2_720p.mp4/?v-acctoken=y', video_alt_url2: 'https://viralxxxporn.com/zh/get_file/3/c/1/2/2_1080p.mp4/?v-acctoken=z', video_alt_url2_text: '1080p' };`
+	if got := viralPlayURL(page1080); !strings.Contains(got, "_1080p.mp4") {
+		t.Fatalf("没有优先 1080p: %s", got)
+	}
 	// 只有标清时退回 video_url。
 	page480 := `var flashvars = { video_url: 'https://viralxxxporn.com/zh/get_file/3/a/1/2/2.mp4/?v-acctoken=x' };`
 	if got := viralPlayURL(page480); !strings.Contains(got, "2.mp4") {
