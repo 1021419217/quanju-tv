@@ -547,6 +547,9 @@ class _FollowPageState extends State<FollowPage> {
         index: catIndex,
         labels: catLabels,
         onIndexChanged: (next) => setState(() => _source = catIds[next]),
+        // 手机端内容延伸到屏顶、顶栏浮在上方，提示胶囊要落在顶栏下面；
+        // 宽屏端 header 是内容区第一块，同样往下让开标题栏。
+        hintTop: top > 40 ? top + 4 : 110,
         child: CustomScrollView(
         slivers: [
           SliverPadding(
