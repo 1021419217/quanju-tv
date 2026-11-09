@@ -12,6 +12,7 @@ import '../widgets/drama_grid.dart';
 import '../widgets/drama_tile.dart';
 import '../widgets/focus_ring.dart';
 import '../widgets/status_view.dart';
+import '../widgets/swipe_category_layer.dart';
 import 'download_actions.dart';
 import 'downloaded_drama_page.dart';
 
@@ -245,6 +246,16 @@ class _DownloadsPageState extends State<DownloadsPage>
     );
   }
 
+  /// 与首页一致：左右快滑在「下载中 / 已下载」之间切换分类。
+  /// 电视端组件会自动跳过手势，遥控器仍用原有焦点切换。
+  Widget _swipeBody(Widget body) => SwipeCategoryLayer(
+    itemCount: 2,
+    index: _tabs.index == 0 ? 0 : 1,
+    labels: const ['下载中', '已下载'],
+    onIndexChanged: (next) => _tabs.animateTo(next),
+    child: body,
+  );
+
   Widget _tabBar(double inset) {
     final pending = pendingDownloads(widget.downloads.jobs).length;
     final downloaded = downloadedDramas(widget.downloads.jobs).length;
@@ -321,7 +332,7 @@ class _DownloadsPageState extends State<DownloadsPage>
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             ?_sourceChips(view, inset: 16, scroll: true),
-            Expanded(child: body),
+            Expanded(child: _swipeBody(body)),
           ],
         ),
       ),
@@ -389,7 +400,7 @@ class _DownloadsPageState extends State<DownloadsPage>
           _tabBar(24),
           const SizedBox(height: 8),
           ?_sourceChips(view, inset: 24),
-          Expanded(child: body),
+          Expanded(child: _swipeBody(body)),
         ],
       ),
     ),

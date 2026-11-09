@@ -343,15 +343,20 @@ func newNativeEngine(directory string) (*nativeEngine, error) {
 	// 这里先拨 tcp4；域名只有 AAAA 时立刻失败并回退原 network，不额外拖时间。
 	baseDialer := &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
 	// 3.33：好色TV 主域 hsex.icu 在部分网络被 DNS 污染到 Facebook 段
-	// （真机 162.125.80.5:443 connection refused）。只把这一个域名的拨号
-	// 固定到 Cloudflare 边缘 IP，URL / Host / SNI / 证书校验都保持 hsex.icu；
-	// m3u8 与分片在独立 CDN（cdn.hdcdn.store），不在此列，其它源完全不受影响。
-	// 边缘 IP 全连不上时回退系统解析，行为与改动前一致，不把源彻底判死。
-	hsexDialer := &net.Dialer{Timeout: 4 * time.Second, KeepAlive: 30 * time.Second}
+	// （真机 162.125.80.5:443 connection refused）。
+	// 3.34：91 主域 91porn.com 同样被污染（真机 154.92.16.97，干净 DNS 是
+	// Cloudflare 104.26.x / 172.67.70.4）。两个域名都只在拨号层固定到 CF
+	// 边缘 IP，URL / Host / SNI / 证书校验保持原域名不变；m3u8、分片、其它
+	// 78 个源一律不受影响。边缘 IP 全连不上时回退系统解析，不把源判死。
+	pinnedDialer := &net.Dialer{Timeout: 4 * time.Second, KeepAlive: 30 * time.Second}
 	transport.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
-		if pinned, ok := hsexDialAddresses(address); ok {
+		pinned, pinnedOK := hsexDialAddresses(address)
+		if !pinnedOK {
+			pinned, pinnedOK = p91DialAddresses(address)
+		}
+		if pinnedOK {
 			for _, candidate := range pinned {
-				if conn, err := hsexDialer.DialContext(ctx, "tcp4", candidate); err == nil {
+				if conn, err := pinnedDialer.DialContext(ctx, "tcp4", candidate); err == nil {
 					return conn, nil
 				}
 			}

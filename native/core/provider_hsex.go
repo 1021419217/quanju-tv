@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // 好色 TV（hsex.icu）：传统 PHP 服务端渲染站，页面就是 Bootstrap 模板，
@@ -350,13 +351,40 @@ func hsexAbsolutePlaylist(body, base string) string {
 	return strings.Join(lines, "\n")
 }
 
-// hsexFetchPlaylist 回源详情页现取 m3u8，并把播放列表内容一起读回来。
+// hsexReadPlaylist 读一份 m3u8 文本并校验是不是真正的播放列表。
+func (d *Downloader) hsexReadPlaylist(ctx context.Context, address, referer string) (string, error) {
+	if strings.TrimSpace(address) == "" {
+		return "", errors.New("好色TV 播放地址为空")
+	}
+	body, err := d.fetchProviderText(ctx, address, referer)
+	if err != nil {
+		return "", fmt.Errorf("好色TV 播放列表读取失败：%v", err)
+	}
+	body = strings.TrimPrefix(strings.TrimSpace(strings.TrimPrefix(body, "\ufeff")), "\ufeff")
+	if !strings.HasPrefix(body, "#EXTM3U") {
+		return "", errors.New("好色TV 播放列表无效，请刷新详情后重试")
+	}
+	return body, nil
+}
+
+// hsexFetchPlaylist 取可播的 m3u8 地址，并把播放列表内容一起读回来。
 //
-// 3.31 只在「缓存里没有 .m3u8 地址」时才回源，否则直接拿着可能是几小时前
-// 的地址去请求 CDN；用户真机上「大部分都提示站方 CDN 返回 HTTP 500」就是
-// 这批陈地址。现在每次起播都现取，并把列表放进 providerMedia.Playlist，
-// 播放器第一次请求直接由本地中转返回，连 CDN 的 m3u8 都不用碰。
-func (d *Downloader) hsexFetchPlaylist(ctx context.Context, pageURL string) (string, string, error) {
+// 3.34：先用详情页缓存下来的地址。m3u8 与分片都在独立 CDN
+// (cdn.hdcdn.store)，不计入 hsex.icu 主域的限流；探针实测主域连续 3 次
+// 请求后必返回 429（Retry-After: 10，四个 CF 边缘 IP 都一样），所以
+// 「每次起播都回源详情页现取」（3.31 为修陈地址 500 加的）会把请求数
+// 打满。现在绝大多数起播只发一次 CDN 请求；地址带时间戳目录失效时
+// （CDN 500/404）再回源现取，3.31 的自愈能力完整保留。
+func (d *Downloader) hsexFetchPlaylist(ctx context.Context, pageURL, cached string) (string, string, error) {
+	cached = strings.TrimSpace(cached)
+	if cached != "" {
+		cacheCtx, cancel := context.WithTimeout(ctx, 6*time.Second)
+		body, err := d.hsexReadPlaylist(cacheCtx, cached, pageURL)
+		cancel()
+		if err == nil && body != "" {
+			return cached, hsexAbsolutePlaylist(body, cached), nil
+		}
+	}
 	pageText, err := d.fetchProviderText(ctx, pageURL, hsexBaseURL+"/")
 	if err != nil {
 		return "", "", fmt.Errorf("好色TV 回源失败：%v", err)
@@ -365,13 +393,9 @@ func (d *Downloader) hsexFetchPlaylist(ctx context.Context, pageURL string) (str
 	if address == "" {
 		return "", "", errors.New("好色TV 未解析到播放地址，请刷新详情后重试")
 	}
-	body, err := d.fetchProviderText(ctx, address, pageURL)
+	body, err := d.hsexReadPlaylist(ctx, address, pageURL)
 	if err != nil {
-		return "", "", fmt.Errorf("好色TV 播放列表读取失败：%v", err)
-	}
-	body = strings.TrimPrefix(strings.TrimSpace(strings.TrimPrefix(body, "\ufeff")), "\ufeff")
-	if !strings.HasPrefix(body, "#EXTM3U") {
-		return "", "", errors.New("好色TV 播放列表无效，请刷新详情后重试")
+		return "", "", err
 	}
 	return address, hsexAbsolutePlaylist(body, address), nil
 }
@@ -384,7 +408,8 @@ func (d *Downloader) resolveHsexMedia(ctx context.Context, task Task) (providerM
 		return providerMedia{}, errors.New("好色TV 播放信息无效，请刷新详情")
 	}
 	pageURL := hsexBaseURL + "/video-" + sourceID + ".htm"
-	address, playlist, err := d.hsexFetchPlaylist(ctx, pageURL)
+	cached := strings.TrimSpace(task.Chapter.VideoURL)
+	address, playlist, err := d.hsexFetchPlaylist(ctx, pageURL, cached)
 	if err != nil {
 		return providerMedia{}, err
 	}
@@ -393,16 +418,17 @@ func (d *Downloader) resolveHsexMedia(ctx context.Context, task Task) (providerM
 		Playlist: playlist,
 		Referer:  pageURL,
 	}
-	// 换线用：重新解析一条新的 m3u8 地址。
+	// 换线用：重新解析一条新的 m3u8 地址。缓存地址已经失效，这里不再
+	// 复用它，强制回源取新的时间戳目录。
 	media.Reload = func(reloadCtx context.Context) (string, error) {
-		fresh, _, err := d.hsexFetchPlaylist(reloadCtx, pageURL)
+		fresh, _, err := d.hsexFetchPlaylist(reloadCtx, pageURL, "")
 		return fresh, err
 	}
 	// 分片 403/5xx 时：返回一份「绝对地址」的新播放列表文本，中转按分片
 	// 身份把旧地址换掉。3.31 这里错把 m3u8 的 URL 当成列表文本返回，
 	// nativeRefreshSegments 的 #EXTM3U 校验必然失败，刷新形同虚设。
 	media.ReloadPlaylist = func(reloadCtx context.Context) (string, error) {
-		_, fresh, err := d.hsexFetchPlaylist(reloadCtx, pageURL)
+		_, fresh, err := d.hsexFetchPlaylist(reloadCtx, pageURL, "")
 		return fresh, err
 	}
 	return media, nil

@@ -8,6 +8,7 @@ import '../ui/widgets/bar_button.dart';
 import '../ui/widgets/frosted_header.dart';
 import '../ui/widgets/focus_ring.dart';
 import '../ui/widgets/status_view.dart';
+import '../ui/widgets/swipe_category_layer.dart';
 import 'live_models.dart';
 import 'live_player_page.dart';
 import 'live_repository.dart';
@@ -246,13 +247,27 @@ class _LivePageState extends State<LivePage> {
         onAction: () => unawaited(_loadPlatforms(force: true)),
       );
     }
+    // 与首页一致：左右快滑在「收藏 / 各平台分类」之间切换。
+    // 电视端组件会自动跳过手势，遥控器方向键行为不变。
+    final platformIds = [_favouritesId, for (final p in _platforms) p.id];
+    final platformLabels = ['收藏', for (final p in _platforms) p.name];
+    var platformIndex = platformIds.indexOf(_platform);
+    if (platformIndex < 0) platformIndex = 0;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         if (sources.length > 1) _sourceBar(sources),
         _platformBar(),
         const Divider(height: 1),
-        Expanded(child: _channelBody(context)),
+        Expanded(
+          child: SwipeCategoryLayer(
+            itemCount: platformIds.length,
+            index: platformIndex,
+            labels: platformLabels,
+            onIndexChanged: (next) => _selectPlatform(platformIds[next]),
+            child: _channelBody(context),
+          ),
+        ),
       ],
     );
   }

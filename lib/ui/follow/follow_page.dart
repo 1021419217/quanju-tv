@@ -15,6 +15,7 @@ import '../widgets/frosted_header.dart';
 import '../widgets/page_header.dart';
 import '../widgets/search_field.dart';
 import '../widgets/status_view.dart';
+import '../widgets/swipe_category_layer.dart';
 
 typedef _View = ({
   List<Drama> follows,
@@ -535,7 +536,18 @@ class _FollowPageState extends State<FollowPage> {
       final first = view.shown.isEmpty
           ? null
           : (updated.firstOrNull ?? rest.first);
-      return CustomScrollView(
+      // 与首页一致：左右快滑在「全部 / 各站源」之间切换分类。
+      // 电视端组件会自动跳过手势，遥控器焦点行为不变。
+      final catIds = ['', for (final site in view.sources) site.id];
+      final catLabels = ['全部', for (final site in view.sources) site.name];
+      var catIndex = catIds.indexOf(view.source);
+      if (catIndex < 0) catIndex = 0;
+      return SwipeCategoryLayer(
+        itemCount: view.sources.length < 2 ? 1 : catIds.length,
+        index: catIndex,
+        labels: catLabels,
+        onIndexChanged: (next) => setState(() => _source = catIds[next]),
+        child: CustomScrollView(
         slivers: [
           SliverPadding(
             padding: EdgeInsets.only(top: top),
@@ -628,6 +640,7 @@ class _FollowPageState extends State<FollowPage> {
             ),
           ),
         ],
+        ),
       );
     },
   );

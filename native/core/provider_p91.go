@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"html"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -376,7 +377,51 @@ var p91BaseState struct {
 
 const p91BaseTTL = 30 * time.Minute
 
-var p91BaseSeeds = []string{p91SiteURL, "https://9p234.com", "https://sp2026.com"}
+// 3.34 真机复测（沙箱系统解析 ≈ 国内真机 / 四家 DoH / 海外机房 curl --resolve）：
+//
+//	91porn.com   沙箱解析 154.92.16.97（污染）；干净 DNS 全是 Cloudflare
+//	             104.26.2.41 / 104.26.3.41 / 172.67.70.4，固定这三个 IP
+//	             直连详情页全部 200。
+//	sp2026.com   沙箱与四家 DoH 一致（104.21.3.74 / 172.67.130.118，CF），
+//	             未被污染，详情页 200，给出的直链与 91porn.com 完全相同。
+//	9p234.com    海外实测 404，已死。
+//
+// 所以把未被污染的官方镜像 sp2026.com 放到首位：详情/取流/续传都走它，
+// 不再需要先卡在污染的 91porn.com 上探测 8 秒。91porn.com 也通过拨号层
+// 固定 CF 边缘 IP 兜底，两者都可用。
+var p91BaseSeeds = []string{"https://sp2026.com", p91SiteURL}
+
+// 3.34：91porn.com 主域在部分网络被 DNS 污染（真机解析到无关段），但站方
+// 就在 Cloudflare 后面。与好色TV 同一套做法：只在拨号层把主域固定到 CF
+// 边缘 IP，URL / Host / SNI / 证书校验全部保持 91porn.com 不变。
+//
+// 这些是 CF 的 anycast 边缘地址，四家 DoH 完全一致、跨机房稳定；全连不上
+// 时 DialContext 会回退系统解析，不把源彻底判死。sp2026.com 未被污染，
+// 不需要固定，继续走系统解析拿站方当前 IP。
+var p91EdgeIPs = []string{
+	"104.26.2.41",
+	"104.26.3.41",
+	"172.67.70.4",
+}
+
+func isP91PinnedHost(host string) bool {
+	host = strings.ToLower(strings.TrimSpace(host))
+	return host == "91porn.com" || host == "www.91porn.com"
+}
+
+// p91DialAddresses 把 91porn.com:443 展开成一组 CF 边缘 IP 地址。
+// 第二个返回值为 false 表示与该主域无关，原样走系统解析。
+func p91DialAddresses(address string) ([]string, bool) {
+	host, port, err := net.SplitHostPort(address)
+	if err != nil || !isP91PinnedHost(host) {
+		return nil, false
+	}
+	out := make([]string, 0, len(p91EdgeIPs))
+	for _, ip := range p91EdgeIPs {
+		out = append(out, net.JoinHostPort(ip, port))
+	}
+	return out, true
+}
 
 func (d *Downloader) p91BaseURL(ctx context.Context) string {
 	p91BaseState.mu.Lock()
@@ -817,20 +862,19 @@ func (d *Downloader) fetchP91Detail(ctx context.Context, sourceID string) (Drama
 	if sourceID == "" || strings.ContainsAny(sourceID, "/?#& ") {
 		return Drama{}, nil, errors.New("91porn 视频 ID 无效")
 	}
-	// 3.33：91porn.com 在真机整域不可达，详情请求会一直挂到前端全局超时
-	// （无限转圈 →「站源响应超时」）。同源 viewkey 的九色可达，详情先借它；
-	// 九色整体不可用时才回退主站，并给主站一个短死线，不再让用户干等。
-	if p91JiuseFallbackEnabled && p91JiuseFirst {
-		if drama, chapters, err := d.p91DetailViaJiuse(ctx, sourceID); err == nil {
-			return drama, chapters, nil
-		}
-	}
+	// 3.34：详情回到 91 自己，不再借九色。
+	// 用户反馈「九色带高清标签的片本来就播不了」，而且 3.33 借九色取详情
+	// 会把 Chapter.VideoURL 留空（不能把九色的 m3u8 塞给 91 章节），取流
+	// 只能再回源一次——多一次请求，还容易失败。现在主站已可达：
+	//   sp2026.com 未被 DNS 污染（官方镜像，详情页 200）；
+	//   91porn.com 在拨号层固定 CF 边缘 IP 绕过污染。
+	// 详情直接拿 91 自己的带签名直链，取流零额外请求，全程不碰九色。
 	ctx, cancel := context.WithTimeout(ctx, p91DetailMainBudget)
 	defer cancel()
 	pageURL := d.p91BaseURL(ctx) + "/view_video.php?viewkey=" + url.QueryEscape(sourceID)
 	pageText, err := d.p91Get(ctx, pageURL)
 	if err != nil {
-		return Drama{}, nil, err
+		return Drama{}, nil, fmt.Errorf("91porn 详情请求失败：%v", publicError(err))
 	}
 	// 站方按游客身份渲染：身份被复用/被限流时会拿别的片子顶上来，
 	// 表现为「看的是 A，播放的是 B」。换一套游客身份重取一次，
@@ -951,7 +995,46 @@ func p91MediaCandidates(pageText, pageURL string) ([]string, int) {
 		seen[address] = true
 		candidates = append(candidates, address)
 	}
+	// 3.34：站方详情页同时给出多条直链，海外 + 沙箱实测的结论是：
+	//   - la.btc620.com 带完整 st/e/k/f 签名，连续 6 次短 Range 全部 206；
+	//   - *.91p52.com 只有 st/f，服务端一律 HTTP/2 PROTOCOL_ERROR，
+	//     HTTP/1.1 与 80 端口也都是 000 —— 真机「连接提前结束」就是它。
+	// 稳定排序把「完整签名」的主直链提到最前，其余保持原有来源顺序；
+	// 坏线仍保留（单片兜底），但由 p91MediaFromCandidates 排除出备用线路。
+	sort.SliceStable(candidates, func(i, j int) bool {
+		return p91MediaRank(candidates[i]) < p91MediaRank(candidates[j])
+	})
 	return candidates, blocked
+}
+
+// p91MediaRank 只做一件事：把带完整 st/e/k/f 签名的主直链提到最前。
+//
+// 其余地址一律同级（稳定排序保留原有「脚本加密串 → 页面直出 → 整页兜底」
+// 的可靠性顺序），不因为缺签名就把相对路径兜底抬到站方直链前面。
+// *.91p52.com 坏线不在这里降级 —— 它由 p91MediaFromCandidates 排除出
+// 备用线路，页面只有这一条时仍要按历史行为正常返回。
+func p91MediaRank(address string) int {
+	parsed, err := url.Parse(strings.TrimSpace(address))
+	if err != nil {
+		return 1
+	}
+	query := parsed.Query()
+	for _, name := range []string{"st", "e", "k", "f"} {
+		if strings.TrimSpace(query.Get(name)) == "" {
+			return 1
+		}
+	}
+	return 0
+}
+
+// p91DeadCDNHost 判断直链是否落在实测不可用的站方旧 CDN（*.91p52.com）。
+// 这些地址仍会被解析出来，但不参与起播与换线。
+func p91DeadCDNHost(address string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(address))
+	if err != nil {
+		return false
+	}
+	return strings.HasSuffix(strings.ToLower(parsed.Hostname()), "91p52.com")
 }
 
 // p91ScriptLiterals 把页面里 strencode2/strencode1/strencode/unescape 调用的
@@ -1178,12 +1261,11 @@ func (d *Downloader) resolveP91Media(ctx context.Context, task Task) (providerMe
 		}
 		candidates = fresh
 	}
-	// 借九色取流（细节见 provider_p91_jiuse.go）。
-	//
-	// 2026-11 实测：91 自己的 CDN 对 HTML5 播放器几乎全线掐断（HTTP/2
-	// PROTOCOL_ERROR / EOF），而同一个 viewkey 在九色的免费老片池里能拿到正经
-	// HLS。所以默认先走九色（p91JiuseFirst），失败再回落到 91 直链——九色这边
-	// 1002 是秒判，代价只有半秒左右，比先转圈十几秒再失败划算得多。
+	// 借九色取流（细节见 provider_p91_jiuse.go）。3.34 起整体关闭：
+	// 九色带高清/VIP 标签的片本来就播不了，借它只会把 91 的片也拖进
+	// 那个池子；91 自己的主站与直链已由「未污染镜像 + 固定 CF IP +
+	// 按签名完整度剔除坏线」修通，详情里就直接带着可用的带签名直链。
+	// 保留这段只是留一条应急开关，默认不会进入。
 	if p91JiuseFallbackEnabled && !p91JiuseBlocked() {
 		needJiuse := p91JiuseFirst || len(candidates) == 0 || p91JiuseDegraded()
 		for _, candidate := range candidates {
@@ -1278,7 +1360,19 @@ func (d *Downloader) p91MediaFromCandidates(candidates []string, pageURL string)
 		if len(media.Variants) >= 3 {
 			break
 		}
+		// *.91p52.com 实测 HTTP/2 PROTOCOL_ERROR，换线到它只会把「能播」
+		// 变成「连接提前结束」，不进备用线路。
+		if p91DeadCDNHost(extra) {
+			continue
+		}
 		media.Variants = append(media.Variants, d.p91MediaFor(extra, false, pageURL))
+	}
+	// 跨境链路上 443 偶发被干扰，而站方 CDN 的 80 端口同样能 206 出流
+	// （海外探针连续 6 次短 Range + 纯 HTTP 全部通过）。补一条纯 HTTP
+	// 备用线路；请求由本地中转发出，不受 iOS ATS 限制。
+	if len(media.Variants) < 3 && strings.HasPrefix(unique[0], "https://") && !p91DeadCDNHost(unique[0]) {
+		plain := "http://" + strings.TrimPrefix(unique[0], "https://")
+		media.Variants = append(media.Variants, d.p91MediaFor(plain, false, pageURL))
 	}
 	return media
 }

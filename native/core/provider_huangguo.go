@@ -549,6 +549,24 @@ func (d *Downloader) fetchProviderRequest(ctx context.Context, rawURL, referer s
 			}
 			if resp.StatusCode < 200 || resp.StatusCode >= 300 || catalogResponseBlockReason(resp, body) != "" {
 				lastErr = d.catalogResponseError(req, resp, body)
+				// 3.34：站方 429 的冷却期本来就该由我们等，不该把
+				// 「HTTP 429，请在 10 秒后重试」原样抛给用户（真机上就是
+				// 「好色TV 回源失败：hsex.icu HTTP 429」）。原先只有
+				// 「请求发出前被 limiter 挡回」（上面的 backoff 分支）会等待；
+				// 真正收到 429 响应走的是这里，之前直接 break 把错误抛了出去。
+				// 两家 DoH 探针实测 Retry-After 恒为 10 秒，等完重发即可。
+				var backoff *requestBackoff
+				if errors.As(lastErr, &backoff) && attempt < attempts {
+					wait := time.Until(backoff.until)
+					if wait > 0 && wait <= 12*time.Second {
+						select {
+						case <-time.After(wait + 200*time.Millisecond):
+							continue
+						case <-ctx.Done():
+							return "", ctx.Err()
+						}
+					}
+				}
 				if catalogResponseBlockReason(resp, body) != "" || resp.StatusCode >= 400 && resp.StatusCode < 500 && resp.StatusCode != 408 {
 					break
 				}

@@ -49,14 +49,19 @@ import (
 // /video/view/{viewkey} 返回 200、有 data-src 和 24 张推荐卡片，即 ID 通用。
 // 所以 3.32 改为「九色优先、直链兜底」：用同源 HLS 避开不可达的 mp4 CDN。
 // 代价是起播多一次详情页 + 一次播放列表（实测合计 1~2 秒），但换来能播。
-const p91JiuseFallbackEnabled = true
-
-// p91JiuseFirst：91 直链先不试，直接走九色。
 //
-// 3.26 曾因「每次白等 8 秒」被用户否定，那时直链本来能播，白等是纯损失；
-// 现在直链在这条链路上 100% 连不上，先试它才是纯损失。1002 是片源级限制，
-// p91JiuseMedia 会秒判并 break，不会逐条线路白等。
-var p91JiuseFirst = true
+// 3.34 废弃：用户真机反馈「九色很多带高清标签的片无法播放」，借道九色
+// 等于把 91 的片也拖进九色的 VIP 池限制里；而且 3.33 借九色取详情会把
+// Chapter.VideoURL 留空，取流还得再回源一次。海外探针重新摸清了 91 自己
+// 的线路：主站只是 DNS 污染（sp2026.com 镜像干净 / 91porn.com 固定 CF IP
+// 可解），真直链 la.btc620.com 带完整签名、连续 6 次短 Range 全 206。
+// 于是详情与取流一起回到 91 自己，九色通道整体关闭、代码留作历史备查。
+const p91JiuseFallbackEnabled = false
+
+// p91JiuseFirst：3.34 起恒为 false。除了取流，它还控制详情与作者作品页
+// 是否借九色（见 fetchP91Detail / nativeAuthorCatalog 的 case sourceP91）；
+// 置 false 后这三处都回到 91 主站，主站已可达。
+var p91JiuseFirst = false
 
 const (
 	// p91JiuseFallbackWindow 是一次 91 播放失败后，降级到九色取流的持续时间。
@@ -239,7 +244,9 @@ func (d *Downloader) p91JiuseMedia(ctx context.Context, viewkey string) (provide
 // 且在这条链路可达，详情也借它，主站只留作兜底并带死线。
 const (
 	p91JiuseDetailBudget = 8 * time.Second
-	p91DetailMainBudget  = 6 * time.Second
+	// 3.34：详情回到主站后留足一次完整请求的时间（含镜像探测与弱网），
+	// 10 秒仍远短于 Dart 层全局超时，不会变成无限转圈。
+	p91DetailMainBudget = 10 * time.Second
 )
 
 // p91DetailFromJiuse 把九色详情解析结果「换身份」回 91 源。
