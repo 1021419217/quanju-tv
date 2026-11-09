@@ -8,6 +8,7 @@ import '../app_scope.dart';
 import '../detail/detail_page.dart';
 import '../settings/settings_rows.dart';
 import '../shell/app_shell.dart';
+import '../widgets/bar_button.dart';
 import '../widgets/drama_grid.dart';
 import '../widgets/drama_tile.dart';
 import '../widgets/focus_ring.dart';
@@ -30,10 +31,14 @@ class FollowPage extends StatefulWidget {
     required this.store,
     required this.entryFocus,
     required this.onExitUp,
+    this.onOpenDownloads,
   });
   final LocalStore store;
   final FocusNode entryFocus;
   final VoidCallback onExitUp;
+
+  /// 「我的下载」入口：放在追剧页顶栏，首页保持干净。
+  final VoidCallback? onOpenDownloads;
 
   @override
   State<FollowPage> createState() => _FollowPageState();
@@ -211,6 +216,16 @@ class _FollowPageState extends State<FollowPage> {
     );
   }
 
+  Widget? _downloadButton() {
+    final open = widget.onOpenDownloads;
+    if (open == null) return null;
+    return BarButton(
+      icon: Icons.download_rounded,
+      tooltip: '我的下载',
+      onPressed: open,
+    );
+  }
+
   Widget _editButtonFor(_View view, {bool icon = true}) => _textButton(
     '编辑',
     view.shown.isEmpty ? null : _startEditing,
@@ -306,7 +321,10 @@ class _FollowPageState extends State<FollowPage> {
         PageHeader(
           title: '追剧',
           count: '${view.shown.length}',
-          actions: [_editButtonFor(view, icon: false)],
+          actions: [
+            ?_downloadButton(),
+            _editButtonFor(view, icon: false),
+          ],
         )
       else
         PageHeader(
@@ -385,6 +403,7 @@ class _FollowPageState extends State<FollowPage> {
                         width: (constraints.maxWidth - 400).clamp(160.0, 280.0),
                         child: _search(),
                       ),
+                      ?_downloadButton(),
                       _editButtonFor(view),
                     ] else ...[
                       IconButton(
@@ -454,6 +473,7 @@ class _FollowPageState extends State<FollowPage> {
                               ),
                             ),
                             const Spacer(),
+                            ?_downloadButton(),
                             _editButtonFor(view),
                           ]
                         : [

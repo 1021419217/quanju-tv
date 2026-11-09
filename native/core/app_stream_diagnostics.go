@@ -69,6 +69,20 @@ func nativeStreamError(err error) string {
 	if errors.Is(err, io.ErrUnexpectedEOF) {
 		return "unexpected_eof"
 	}
+	// io_error 太笼统：用户只看到「诊断：传输中断」，没法区分是链路被
+	// 重置、对端提前关闭，还是纯粹的读错误。把常见的连接层错误细分出来，
+	// 下一轮反馈就能直接判断是网络问题还是代码问题，不用再靠猜。
+	text := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(text, "connection reset") || strings.Contains(text, "reset by peer"):
+		return "connection_reset"
+	case strings.Contains(text, "broken pipe") || strings.Contains(text, "connection closed"):
+		return "connection_closed"
+	case errors.Is(err, io.EOF):
+		return "eof"
+	case strings.Contains(text, "http2") || strings.Contains(text, "protocol_error"):
+		return "http2_error"
+	}
 	return "io_error"
 }
 

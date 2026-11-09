@@ -23,13 +23,8 @@ class ExplorePage extends StatefulWidget {
   const ExplorePage({
     super.key,
     required this.store,
-    this.onOpenDownloads,
   });
   final LocalStore store;
-
-  /// 首页顶栏的「我的下载」快捷入口。下载完的片子不该只能去「设置 →
-  /// 下载」里翻，放在首页一键可达。
-  final VoidCallback? onOpenDownloads;
 
   @override
   State<ExplorePage> createState() => ExplorePageState();
@@ -353,13 +348,7 @@ class ExplorePageState extends State<ExplorePage>
         onOpenSearch: () => openSearch(context, widget.store, source),
         onSearchSubmitted: (query) => _searchSubmitted(source, query),
         actions: [
-          // 直播已移到底部导航作为独立 tab，顶栏不再重复放入口。
-          if (widget.onOpenDownloads case final open?)
-            BarButton(
-              icon: Icons.download_rounded,
-              tooltip: '我的下载',
-              onPressed: open,
-            ),
+          // 直播已移到底部导航作为独立 tab；「我的下载」按用户要求放在追剧页。
           if (desktop)
             BarButton(
               icon: Icons.refresh_rounded,

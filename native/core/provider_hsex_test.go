@@ -117,3 +117,45 @@ func TestHsexDetailTitleAndValidation(t *testing.T) {
 		}
 	}
 }
+
+// 3.32：播放列表里的相对分片必须改写成绝对地址，否则刷新列表时
+// 时间戳目录一变，中转按 host+path 就再也匹配不上旧分片。
+func TestHsexAbsolutePlaylist(t *testing.T) {
+	body := "#EXTM3U\n#EXT-X-VERSION:3\n#EXTINF:6.3,\nindex0.ts\n#EXTINF:5.6,\nindex1.ts\n#EXT-X-ENDLIST\n"
+	base := "https://cdn.hdcdn.store/1794185829/TK/hls/1257475/index.m3u8"
+	got := hsexAbsolutePlaylist(body, base)
+	if strings.Contains(got, "\nindex0.ts") || strings.Contains(got, "\nindex1.ts") {
+		t.Fatalf("相对分片未绝对化：\n%s", got)
+	}
+	want := "https://cdn.hdcdn.store/1794185829/TK/hls/1257475/index0.ts"
+	if !strings.Contains(got, want) {
+		t.Fatalf("绝对地址异常：\n%s", got)
+	}
+	if !strings.HasPrefix(got, "#EXTM3U") || !strings.Contains(got, "#EXT-X-ENDLIST") {
+		t.Fatalf("列表结构被破坏：\n%s", got)
+	}
+}
+
+// 站方作者页分页在路径里，且中文作者名不能二次转义。
+func TestHsexAuthorAddress(t *testing.T) {
+	if got := hsexAuthorAddress("gxd89697031", 2); got != "https://hsex.icu/user-2.htm?author=gxd89697031" {
+		t.Fatalf("作者页地址 = %s", got)
+	}
+	got := hsexAuthorAddress("91%E5%9D%8F%E5%8F%94%E5%8F%94", 3)
+	if !strings.HasPrefix(got, "https://hsex.icu/user-3.htm?author=") || strings.Contains(got, "%25") {
+		t.Fatalf("中文作者不应二次转义：%s", got)
+	}
+}
+
+func TestHsexAuthorSlugValidation(t *testing.T) {
+	for _, ok := range []string{"gxd89697031", "91坏叔叔", "a.b-c", "91%E5%9D%8F%E5%8F%94%E5%8F%94"} {
+		if !validHsexAuthorSlug(ok) {
+			t.Fatalf("%q 应合法", ok)
+		}
+	}
+	for _, bad := range []string{"", "  ", "../x", "a/b", "a?b", "a&b", "a\\b", strings.Repeat("x", 300)} {
+		if validHsexAuthorSlug(bad) {
+			t.Fatalf("%q 应被拒", bad)
+		}
+	}
+}

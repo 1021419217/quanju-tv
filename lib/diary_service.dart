@@ -28,10 +28,10 @@ class DiaryService {
   }
 
   static List<String> get entries => List<String>.unmodifiable([
-    ..._entries,
-    if (_nativeText.isNotEmpty) ..._nativeText.split('\n'),
-    if (_crashText.isNotEmpty) ..._crashText.split('\n'),
-  ]);
+        ..._entries,
+        if (_nativeText.isNotEmpty) ..._nativeText.split('\n'),
+        if (_crashText.isNotEmpty) ..._crashText.split('\n'),
+      ]);
 
   /// 最近一条原生流诊断里的失败原因。
   ///
@@ -76,6 +76,14 @@ class DiaryService {
         return '连接超时';
       case 'unexpected_eof':
         return '连接被中断';
+      case 'connection_reset':
+        return '连接被重置（链路拒绝）';
+      case 'connection_closed':
+        return '连接被对端关闭';
+      case 'eof':
+        return '连接提前结束';
+      case 'http2_error':
+        return 'CDN 协议协商失败';
       case 'canceled':
         return '请求被取消';
       default:
@@ -145,9 +153,8 @@ class DiaryService {
     }
     final crash = await _readStderrTail();
     if (clears != _clears) return;
-    _nativeText = lines
-        .skip(lines.length > 500 ? lines.length - 500 : 0)
-        .join('\n');
+    _nativeText =
+        lines.skip(lines.length > 500 ? lines.length - 500 : 0).join('\n');
     _crashText = crash;
   }
 

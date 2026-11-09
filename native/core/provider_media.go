@@ -137,7 +137,7 @@ func providerSourceForURL(raw string) string {
 		return sourceXChina
 	case host == "theporny.com" || host == "www.theporny.com":
 		return sourceTheporny
-	case host == "kissavs.com" || host == "www.kissavs.com":
+	case host == "kissavs.com" || host == "www.kissavs.com" || isKissavMirrorHost(host):
 		return sourceKissav
 	case host == "viralxxxporn.com" || host == "www.viralxxxporn.com":
 		return sourceViral
@@ -154,9 +154,14 @@ func providerSourceForURL(raw string) string {
 
 func (d *Downloader) providerURLCandidates(raw string) []string {
 	source := providerSourceForURL(raw)
-	// 这三个源只有一个固定域名，地址里的签名与 host 绑定，改写 host 只会 403。
+	// KISSAV 主域名在部分网络被掐（EOF），站方另有一批 Cloudflare 直连线路，
+	// 内容逐字节一致，逐个候选试过去即可。只对主域名展开。
+	if source == sourceKissav {
+		return kissavURLCandidates(raw)
+	}
+	// 这几个源只有一个固定域名，地址里的签名与 host 绑定，改写 host 只会 403。
 	if source == "" || source == sourceHuangju || source == sourceYeguo ||
-		source == sourceKissav || source == sourceViral || source == sourceP91 || source == sourceJiuse || source == sourceHsex {
+		source == sourceViral || source == sourceP91 || source == sourceJiuse || source == sourceHsex {
 		return []string{raw}
 	}
 	parsed, _ := url.Parse(raw)

@@ -39,16 +39,23 @@ import (
 //	去掉 Referer → 连接直接被掐（http=000）
 //	去掉签名   → HTTP 302
 //
-// 也就是说 91 直链本身是好的，签名也是完整的（st 22 位 / e 10 位 / k 6 位 /
-// f 154 位），真正的问题是「先走九色」这一步：九色对 91 的新片一律 1002，
-// 每次起播白等最多 8 秒，用户看到的就是一直转圈。所以关掉借道，回到直链优先。
-const p91JiuseFallbackEnabled = false
+// 2026-11-09 真机复测（3.30/3.31 两版都失败）：海外机房直链 40MB 1.4 秒拉完、
+// 连续 Range 全 206，但用户手机上 91 **每一部**都报「诊断：传输中断」
+// （nativeStreamError 归到 io_error，即连接被重置）。同一台手机上九色
+// 「大部分秒播」——说明不是整网封锁，而是 91 直链的 CDN（la.btc620.com
+// 等）在这条链路上不可用。
+//
+// 海外机房也验证了同源映射：91 的 viewkey 直接请求九色
+// /video/view/{viewkey} 返回 200、有 data-src 和 24 张推荐卡片，即 ID 通用。
+// 所以 3.32 改为「九色优先、直链兜底」：用同源 HLS 避开不可达的 mp4 CDN。
+// 代价是起播多一次详情页 + 一次播放列表（实测合计 1~2 秒），但换来能播。
+const p91JiuseFallbackEnabled = true
 
 // p91JiuseFirst：91 直链先不试，直接走九色。
 //
-// 91 的直链失败率高到「十部九不播」，先试它等于每次先给用户一段转圈；
-// 九色失败只要 0.5~1 秒（1002 立刻判死），而且成功率高得多。等哪天 91 的
-// CDN 恢复，把这个常量改回 false 即可回到「直链优先」。
+// 3.26 曾因「每次白等 8 秒」被用户否定，那时直链本来能播，白等是纯损失；
+// 现在直链在这条链路上 100% 连不上，先试它才是纯损失。1002 是片源级限制，
+// p91JiuseMedia 会秒判并 break，不会逐条线路白等。
 var p91JiuseFirst = true
 
 const (
@@ -165,6 +172,10 @@ func (d *Downloader) p91JiuseMedia(ctx context.Context, viewkey string) (provide
 	defer cancel()
 
 	var reasons []string
+	// 1002 是「这一部片是 VIP 新片」，不是九色整体挂了。若把它计入熔断，
+	// 连点三部 VIP 片就会把九色封 10 分钟，后面本来能播的片全被赶回
+	// 连不上的 91 直链——3.31 的「统一传输中断」有一半是这个放大出来的。
+	vipOnly := false
 	for _, line := range jiusePlayLines {
 		if budget.Err() != nil {
 			break
@@ -189,6 +200,7 @@ func (d *Downloader) p91JiuseMedia(ctx context.Context, viewkey string) (provide
 			reasons = append(reasons, jiuseLineLabel(line)+": "+reason)
 			// 1002 是片源级限制，四条线路一样，换线只会让用户白等。
 			if strings.Contains(reason, "1002") {
+				vipOnly = true
 				break
 			}
 			continue
@@ -207,7 +219,11 @@ func (d *Downloader) p91JiuseMedia(ctx context.Context, viewkey string) (provide
 			},
 		}, nil
 	}
-	p91NoteJiuseFailure()
+	// 只有「九色整体不可用」（连不上 / 全线取不到地址）才累积熔断；
+	// 单片 1002 属于站方片源限制，熔断它等于把能播的片一起判死。
+	if !vipOnly {
+		p91NoteJiuseFailure()
+	}
 	if len(reasons) == 0 {
 		reasons = append(reasons, "没有可用的播放线路")
 	}

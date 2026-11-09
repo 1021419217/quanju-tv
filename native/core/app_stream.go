@@ -585,11 +585,20 @@ func (stream *nativeStreamServer) nativeServe(writer http.ResponseWriter, reques
 	// HLS 源（kissav 等）的分片签名会过期：播到一半时整批分片突然 403，
 	// 换线没用（同一份列表）、重新解析地址也没用（地址没变，变的是签名）。
 	// 只有重新取一份播放列表才能换到新签名，所以这一步排在换线之前。
-	if err != nil || (response != nil && response.StatusCode >= 400) {
+	// 签名过期 / 被 CDN 重定向到验证页时，上游会「302 → 跟随 → 200 + text/html」。
+	// 只有备用线路那条路径（nativeFetchWithFallback.attempt）拦了 HTML，主路径
+	// 原来直接把网页当媒体透传给播放器：io.Copy 是成功的，播放器却只会报
+	// 解码失败 /「传输中断」，而且永远不会触发换线或重新解析。91 统一报
+	// 「传输中断」有一半就是这个 200 假响应造成的，主路径必须同样判死。
+	if err != nil || (response != nil && (response.StatusCode >= 400 || nativeHTMLResponse(response))) {
 		recovered := false
-		if response != nil &&
-			(response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden) &&
-			session.refreshPlaylist != nil {
+		// 好色TV 的 CDN 真机上会整批回 500（海外机房与沙箱都复现不出，
+		// 属链路/节点差异），和签名过期一样，重取一份播放列表换新的
+		// 时间戳目录就能救回来。把 5xx 也纳入刷新触发条件。
+		if response != nil && session.refreshPlaylist != nil &&
+			(response.StatusCode == http.StatusUnauthorized ||
+				response.StatusCode == http.StatusForbidden ||
+				response.StatusCode >= http.StatusInternalServerError) {
 			if retry, retryRequest, retryErr := stream.nativeRetryAfterRefresh(ctx, upstream, session, parts[1]); retryErr == nil {
 				_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 64<<10))
 				response.Body.Close()
@@ -616,6 +625,16 @@ func (stream *nativeStreamServer) nativeServe(writer http.ResponseWriter, reques
 		return
 	}
 	defer response.Body.Close()
+	// 换线/重解析都没救回来时，绝不能把网页字节写给播放器：那样播放器只会
+	// 含糊地报「传输中断」，还不知道要重新加载。给一个明确的 5xx，让上层
+	// 触发自动恢复，同时把原因写进诊断日志。
+	if nativeHTMLResponse(response) {
+		stream.nativeLog(info, "upstream_html", fetchAddress,
+			"上游返回网页而非媒体，播放地址可能已过期", response.StatusCode,
+			response.Header.Get("Content-Type"))
+		http.Error(writer, "播放地址已失效，正在重新获取", http.StatusBadGateway)
+		return
+	}
 	if response.StatusCode != http.StatusOK && response.StatusCode != http.StatusPartialContent {
 		body, _ := io.ReadAll(io.LimitReader(response.Body, 64<<10))
 		err := stream.downloader.catalogResponseError(upstream, response, body)

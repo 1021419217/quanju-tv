@@ -140,6 +140,14 @@ func (limiter *requestLimiter) acquire(ctx context.Context, request *http.Reques
 		gate = &requestGate{}
 		limiter.gates[source] = gate
 	}
+	// 好色TV 的 Cloudflare 对单 IP 限流很紧（实测连点几页就 429，
+	// Retry-After 9~60 秒），全局 150ms / 并发 2 会把它打爆。单独降到
+	// 串行 + 700ms 间隔：目录/详情请求本来就少，慢这一点换不出现 429。
+	gateConcurrency := requestGateConcurrency
+	gateInterval := limiter.interval
+	if source == sourceHsex {
+		gateConcurrency, gateInterval = 1, 700*time.Millisecond
+	}
 	limiter.mu.Unlock()
 	for {
 		if err := ctx.Err(); err != nil {
@@ -154,7 +162,7 @@ func (limiter *requestLimiter) acquire(ctx context.Context, request *http.Reques
 			limiter.mu.Unlock()
 			return nil, backoff
 		}
-		delay := time.Until(gate.lastStart.Add(limiter.interval))
+		delay := time.Until(gate.lastStart.Add(gateInterval))
 		if background {
 
 			if idleDelay := time.Until(limiter.lastForeground.Add(limiter.interval)); idleDelay > delay {
@@ -162,7 +170,7 @@ func (limiter *requestLimiter) acquire(ctx context.Context, request *http.Reques
 			}
 		}
 		lowPriorityReady := !background || limiter.foregroundWaiting == 0 && limiter.active == 0
-		if lowPriorityReady && gate.active < requestGateConcurrency && limiter.active < limiter.concurrency && delay <= 0 {
+		if lowPriorityReady && gate.active < gateConcurrency && limiter.active < limiter.concurrency && delay <= 0 {
 			gate.active++
 			gate.lastStart = time.Now()
 			limiter.active++

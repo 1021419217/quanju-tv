@@ -222,12 +222,12 @@ class _AppShellState extends State<AppShell>
     AppTab.explore => ExplorePage(
       key: _explore,
       store: widget.store,
-      onOpenDownloads: () => _openDownloads(context),
     ),
     AppTab.follow => FollowPage(
       store: widget.store,
       entryFocus: _followEntry,
       onExitUp: _tabFocus[AppTab.follow.index].requestFocus,
+      onOpenDownloads: () => _openDownloads(context),
     ),
     AppTab.live => LivePage(
       repository: sharedLiveRepository(),

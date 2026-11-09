@@ -24,6 +24,45 @@ const (
 	kissavPlayerPrefix = kissavBaseURL + "/media/m3u8/"
 )
 
+// kissavMirrorHosts 是站方「地址发布页」里下发的直连线路。
+//
+// 发布页（kissav.me / kissav.net）用单词表随机拼出 <word>.npb6frvj.cc，
+// 走 Cloudflare（104.21.x / 172.67.x），与主站 kissavs.com 的自有 IP
+// 43.229.x 完全是两个网络。海外机房与沙箱实测：这些子域的列表页、详情页、
+// /media/m3u8/ 代理全部返回与主站逐字节一致的内容（549 段、96236 字节）。
+// 用户真机上「Get https://kissavs.com/av/updates/: EOF」是主站 IP/SNI 在
+// 这条链路上被掐，换到 Cloudflare 线路就能绕开。
+var kissavMirrorHosts = []string{
+	"abandon.npb6frvj.cc",
+	"ability.npb6frvj.cc",
+	"apple.npb6frvj.cc",
+}
+
+func isKissavMirrorHost(host string) bool {
+	host = strings.ToLower(strings.TrimSpace(host))
+	return strings.HasSuffix(host, ".npb6frvj.cc") && len(host) > len(".npb6frvj.cc")
+}
+
+// kissavURLCandidates 把主域名请求展开成「主站 + 备用线路」候选。
+// 只对 kissavs.com 展开；已经是备用线路的地址保持单候选，避免套娃。
+func kissavURLCandidates(raw string) []string {
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Host == "" {
+		return []string{raw}
+	}
+	host := strings.ToLower(parsed.Hostname())
+	if host != "kissavs.com" && host != "www.kissavs.com" {
+		return []string{raw}
+	}
+	candidates := []string{raw}
+	for _, mirror := range kissavMirrorHosts {
+		copy := *parsed
+		copy.Host = mirror
+		candidates = append(candidates, copy.String())
+	}
+	return candidates
+}
+
 // kissavCategories 是内置分类。ID 直接映射到站方路径（见 kissavCategoryPaths），
 // 分页统一是「路径 + page/N/」。
 var kissavCategories = []nativeCategory{

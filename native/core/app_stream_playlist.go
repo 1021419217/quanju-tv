@@ -27,6 +27,21 @@ func nativeSegmentKey(address string) string {
 	return parsed.Host + parsed.Path
 }
 
+// nativeSegmentNameKey 只取分片文件名。有些站（好色TV）重取播放列表后
+// 连目录都会换（路径里带时间戳），host+path 就对不上了；同一份列表里
+// index0.ts / index1.ts 这类名字是稳定的，用它做二级匹配。
+func nativeSegmentNameKey(address string) string {
+	parsed, err := url.Parse(strings.TrimSpace(address))
+	if err != nil {
+		return ""
+	}
+	parts := strings.Split(strings.Trim(parsed.Path, "/"), "/")
+	if len(parts) == 0 || parts[len(parts)-1] == "" {
+		return ""
+	}
+	return parts[len(parts)-1]
+}
+
 // nativeSegmentAddresses 把一份播放列表摊成「分片身份 → 最新地址」。
 func nativeSegmentAddresses(text, base string) map[string]string {
 	result := make(map[string]string, 64)
@@ -88,6 +103,12 @@ func (stream *nativeStreamServer) nativeRefreshSegments(ctx context.Context, ses
 	if len(fresh) == 0 {
 		return false
 	}
+	freshByName := make(map[string]string, len(fresh))
+	for _, address := range fresh {
+		if name := nativeSegmentNameKey(address); name != "" {
+			freshByName[name] = address
+		}
+	}
 
 	replaced := 0
 	session.mu.Lock()
@@ -97,6 +118,10 @@ func (stream *nativeStreamServer) nativeRefreshSegments(ctx context.Context, ses
 		}
 		key := nativeSegmentKey(asset.address)
 		address, ok := fresh[key]
+		if !ok {
+			// 目录变了（好色TV 的时间戳目录）：退到文件名匹配。
+			address, ok = freshByName[nativeSegmentNameKey(asset.address)]
+		}
 		if !ok || address == asset.address {
 			continue
 		}

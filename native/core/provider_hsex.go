@@ -47,6 +47,9 @@ var (
 	reHsexImageTitle = regexp.MustCompile(`(?is)class="image"[^>]*title=\s*"([^"]*)"`)
 	reHsexDuration   = regexp.MustCompile(`<var class="duration">\s*(\d{1,2}):(\d{2})\s*</var>`)
 	reHsexAuthor     = regexp.MustCompile(`href="user\.htm\?author=([^"&]+)"`)
+	// 本片作者写在 panel-body 的「作者：」格子里，位置在推荐卡片之前；
+	// 带名字一起抓，中文作者名（URL 编码）才能正常显示。
+	reHsexAuthorLink = regexp.MustCompile(`(?is)作者：\s*<a[^>]*href="user\.htm\?author=([^"&]+)"[^>]*>(.*?)</a>`)
 	reHsexPanelTitle = regexp.MustCompile(`(?is)<h3[^>]*class="panel-title"[^>]*>(.*?)</h3>`)
 	reHsexOgImage    = regexp.MustCompile(`(?is)property="og:image"[^>]*content="([^"]+)"`)
 	reHsexSource     = regexp.MustCompile(`(?is)<source[^>]+src="(https?://[^"]+\.m3u8[^"]*)"`)
@@ -250,8 +253,23 @@ func (d *Downloader) fetchHsexDetail(ctx context.Context, sourceID string) (Dram
 		seconds = minutes*60 + secs
 	}
 	drama := hsexDrama(sourceID, title, cover, "", seconds)
-	if match := reHsexAuthor.FindStringSubmatch(pageText); match != nil {
-		drama.Author = p91CleanText(match[1])
+	if match := reHsexAuthorLink.FindStringSubmatch(pageText); match != nil {
+		drama.AuthorID = strings.TrimSpace(match[1])
+		name := p91CleanText(match[2])
+		// 站内作者名常是 URL 编码（如 91%E5%9D%8F…），展示时解回来。
+		if decoded, err := url.QueryUnescape(drama.AuthorID); err == nil {
+			name = p91CleanText(decoded)
+		}
+		if name != "" {
+			drama.Author = name
+		} else {
+			drama.Author = drama.AuthorID
+		}
+	} else if match := reHsexAuthor.FindStringSubmatch(pageText); match != nil {
+		drama.AuthorID = strings.TrimSpace(match[1])
+		if decoded, err := url.QueryUnescape(drama.AuthorID); err == nil {
+			drama.Author = p91CleanText(decoded)
+		}
 	}
 	chapter := Chapter{
 		ID:       providerChapterID(sourceHsex, sourceID, "main"),
@@ -265,6 +283,57 @@ func (d *Downloader) fetchHsexDetail(ctx context.Context, sourceID string) (Dram
 	return drama, []Chapter{chapter}, nil
 }
 
+// hsexAbsolutePlaylist 把 m3u8 里的相对分片改成绝对地址。
+//
+// 站方 m3u8 路径带一个时间戳目录（/1794185829/<token>/hls/<id>/），重新
+// 取一次详情页时这个目录会变。中转刷新播放列表是按「host + path」认分片的，
+// 若列表里还写相对地址，就只能拿旧目录去解析，永远换不到新目录。
+func hsexAbsolutePlaylist(body, base string) string {
+	parsed, err := url.Parse(base)
+	if err != nil {
+		return body
+	}
+	lines := strings.Split(strings.ReplaceAll(body, "\r\n", "\n"), "\n")
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		ref, err := url.Parse(trimmed)
+		if err != nil || ref.IsAbs() {
+			continue
+		}
+		lines[i] = parsed.ResolveReference(ref).String()
+	}
+	return strings.Join(lines, "\n")
+}
+
+// hsexFetchPlaylist 回源详情页现取 m3u8，并把播放列表内容一起读回来。
+//
+// 3.31 只在「缓存里没有 .m3u8 地址」时才回源，否则直接拿着可能是几小时前
+// 的地址去请求 CDN；用户真机上「大部分都提示站方 CDN 返回 HTTP 500」就是
+// 这批陈地址。现在每次起播都现取，并把列表放进 providerMedia.Playlist，
+// 播放器第一次请求直接由本地中转返回，连 CDN 的 m3u8 都不用碰。
+func (d *Downloader) hsexFetchPlaylist(ctx context.Context, pageURL string) (string, string, error) {
+	pageText, err := d.fetchProviderText(ctx, pageURL, hsexBaseURL+"/")
+	if err != nil {
+		return "", "", fmt.Errorf("好色TV 回源失败：%v", err)
+	}
+	address := hsexPlayAddress(pageText)
+	if address == "" {
+		return "", "", errors.New("好色TV 未解析到播放地址，请刷新详情后重试")
+	}
+	body, err := d.fetchProviderText(ctx, address, pageURL)
+	if err != nil {
+		return "", "", fmt.Errorf("好色TV 播放列表读取失败：%v", err)
+	}
+	body = strings.TrimPrefix(strings.TrimSpace(strings.TrimPrefix(body, "\ufeff")), "\ufeff")
+	if !strings.HasPrefix(body, "#EXTM3U") {
+		return "", "", errors.New("好色TV 播放列表无效，请刷新详情后重试")
+	}
+	return address, hsexAbsolutePlaylist(body, address), nil
+}
+
 func (d *Downloader) resolveHsexMedia(ctx context.Context, task Task) (providerMedia, error) {
 	source, sourceID, valid := splitProviderDramaID(task.DramaID)
 	prefix := providerChapterID(sourceHsex, sourceID, "")
@@ -273,34 +342,77 @@ func (d *Downloader) resolveHsexMedia(ctx context.Context, task Task) (providerM
 		return providerMedia{}, errors.New("好色TV 播放信息无效，请刷新详情")
 	}
 	pageURL := hsexBaseURL + "/video-" + sourceID + ".htm"
-	address := strings.TrimSpace(task.Chapter.VideoURL)
-	if !strings.Contains(address, ".m3u8") {
-		// 详情缓存里没有地址（老缓存 / 当时解析失败）：回源现取。
-		pageText, err := d.fetchProviderText(ctx, pageURL, hsexBaseURL+"/")
-		if err != nil {
-			return providerMedia{}, fmt.Errorf("好色TV 回源失败：%v", err)
-		}
-		fresh := hsexPlayAddress(pageText)
-		if fresh == "" {
-			return providerMedia{}, errors.New("好色TV 未解析到播放地址，请刷新详情后重试")
-		}
-		address = fresh
+	address, playlist, err := d.hsexFetchPlaylist(ctx, pageURL)
+	if err != nil {
+		return providerMedia{}, err
 	}
-	return providerMedia{
-		URL:     address,
-		Referer: pageURL,
-		// m3u8 路径里带站点下发的时间戳目录，播放久了可能整批失效。
-		// 传输层遇到分片 403 时调这里重新解析一次详情页，拿一份新地址。
-		ReloadPlaylist: func(reloadCtx context.Context) (string, error) {
-			pageText, err := d.fetchProviderText(reloadCtx, pageURL, hsexBaseURL+"/")
-			if err != nil {
-				return "", err
-			}
-			fresh := hsexPlayAddress(pageText)
-			if fresh == "" {
-				return "", errors.New("好色TV 重新解析播放地址失败")
-			}
-			return fresh, nil
-		},
-	}, nil
+	media := providerMedia{
+		URL:      address,
+		Playlist: playlist,
+		Referer:  pageURL,
+	}
+	// 换线用：重新解析一条新的 m3u8 地址。
+	media.Reload = func(reloadCtx context.Context) (string, error) {
+		fresh, _, err := d.hsexFetchPlaylist(reloadCtx, pageURL)
+		return fresh, err
+	}
+	// 分片 403/5xx 时：返回一份「绝对地址」的新播放列表文本，中转按分片
+	// 身份把旧地址换掉。3.31 这里错把 m3u8 的 URL 当成列表文本返回，
+	// nativeRefreshSegments 的 #EXTM3U 校验必然失败，刷新形同虚设。
+	media.ReloadPlaylist = func(reloadCtx context.Context) (string, error) {
+		_, fresh, err := d.hsexFetchPlaylist(reloadCtx, pageURL)
+		return fresh, err
+	}
+	return media, nil
+}
+
+// validHsexAuthorSlug：站内作者名就是显示名，含中文与 URL 编码，不能套
+// ASCII 白名单。只挡掉路径穿越、协议分隔符和明显过长的输入。
+func validHsexAuthorSlug(slug string) bool {
+	slug = strings.TrimSpace(slug)
+	if slug == "" || len(slug) > 256 {
+		return false
+	}
+	if strings.ContainsAny(slug, "/\\?#&<>\"'\x00") || strings.Contains(slug, "..") {
+		return false
+	}
+	return true
+}
+
+// hsexAuthorAddress 是站方作者页地址。分页写在路径里（user-2.htm），
+// 不是 user.htm?author=X&page=N——后者实测一直返回第一页。
+func hsexAuthorAddress(slug string, page int) string {
+	// 详情页里的 slug 可能是 URL 编码过的中文，先解回来再编码，避免二次转义。
+	if decoded, err := url.QueryUnescape(slug); err == nil {
+		slug = decoded
+	}
+	return fmt.Sprintf("%s/user-%d.htm?author=%s", hsexBaseURL, page, url.QueryEscape(slug))
+}
+
+// fetchHsexAuthorPage 取某个作者发布的其它作品，每页 20 张卡片，
+// 结构与列表页完全一致，复用解析。
+func (d *Downloader) fetchHsexAuthorPage(ctx context.Context, authorID string, page int) ([]Drama, bool, error) {
+	slug := strings.TrimSpace(authorID)
+	if !validHsexAuthorSlug(slug) {
+		return nil, false, errors.New("好色TV 作者 ID 无效")
+	}
+	if decoded, err := url.QueryUnescape(slug); err == nil {
+		slug = decoded
+	}
+	if !validHsexAuthorSlug(slug) {
+		return nil, false, errors.New("好色TV 作者 ID 无效")
+	}
+	if page < 1 || page > 2000 {
+		return nil, false, errors.New("页码无效")
+	}
+	address := hsexAuthorAddress(slug, page)
+	pageText, err := d.fetchProviderText(ctx, address, hsexBaseURL+"/")
+	if err != nil {
+		return nil, false, err
+	}
+	items := parseHsexCards(pageText, "")
+	for i := range items {
+		items[i].AuthorID = authorID
+	}
+	return items, len(items) >= 20, nil
 }

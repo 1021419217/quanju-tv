@@ -53,6 +53,28 @@ func TestNativeRefreshSegmentsNoChange(t *testing.T) {
 	}
 }
 
+// 好色TV 重取播放列表后时间戳目录会变，host+path 对不上；必须能按
+// 分片文件名（index0.ts 等）把旧地址换成新目录下的地址。
+func TestNativeRefreshSegmentsByFileName(t *testing.T) {
+	oldSegment := "https://cdn.hdcdn.store/1794185829/OLD/hls/1257475/index0.ts"
+	stream := &nativeStreamServer{sessions: map[string]*nativeStreamSession{}}
+	session := &nativeStreamSession{
+		assets: map[string]nativeStreamAsset{
+			"asset0": {kind: "segment", address: oldSegment},
+		},
+		refreshPlaylist: func(context.Context) (string, error) {
+			return "#EXTM3U\n#EXTINF:6,\nhttps://cdn.hdcdn.store/1794199999/NEW/hls/1257475/index0.ts\n#EXT-X-ENDLIST\n", nil
+		},
+	}
+	if !stream.nativeRefreshSegments(context.Background(), session) {
+		t.Fatal("目录变化时应能按文件名替换")
+	}
+	got := session.assets["asset0"].address
+	if got != "https://cdn.hdcdn.store/1794199999/NEW/hls/1257475/index0.ts" {
+		t.Fatalf("未换到新目录：%s", got)
+	}
+}
+
 func TestNativeRefreshSegmentsBudget(t *testing.T) {
 	stream := &nativeStreamServer{sessions: map[string]*nativeStreamSession{}}
 	calls := 0

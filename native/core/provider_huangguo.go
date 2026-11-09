@@ -500,25 +500,35 @@ func (d *Downloader) fetchProviderRequest(ctx context.Context, rawURL, referer s
 			if noCache, _ := ctx.Value(providerTextNoCacheKey{}).(bool); noCache {
 				req.Header.Set("Cache-Control", "no-cache")
 			}
-			// KISSAV 在开了全局代理的手机上照样 EOF：代理对 TLS1.3 / HTTP2 的
-			// 处理与浏览器不同，而 Go 不会像浏览器那样自动退回 1.1。该源第一条
-			// 请求就直接用 TLS1.2+HTTP1.1 的兼容客户端，不等失败再重试。
+			// 传输层被掐断（EOF / connection reset）时换 TLS1.2 + HTTP/1.1 的
+			// 兼容客户端补一次。KISSAV 原来强制第一步就走兼容客户端，但 3.32
+			// 新增的 Cloudflare 备用线路用标准客户端反而更稳；改成「标准优先、
+			// 兼容兜底」后，两条链路、两种传输参数都能覆盖到。
 			var resp *http.Response
-			if source == sourceKissav {
-				resp, err = d.doCompatCatalogRequest(req, timeout)
-			} else {
-				resp, err = d.doCatalogRequestWithTimeout(req, timeout)
-				if err != nil && payload == nil && providerTransportBroken(err) {
-					// 其它源只在「像被掐断」时补一次兼容重试。
-					if retryResp, retryErr := d.doCompatCatalogRequest(req, timeout); retryErr == nil {
-						resp, err = retryResp, nil
-					}
+			resp, err = d.doCatalogRequestWithTimeout(req, timeout)
+			if err != nil && payload == nil && providerTransportBroken(err) {
+				if retryResp, retryErr := d.doCompatCatalogRequest(req, timeout); retryErr == nil {
+					resp, err = retryResp, nil
 				}
 			}
 			if err != nil {
 				lastErr = err
 				var backoff *requestBackoff
 				if errors.As(err, &backoff) {
+					// 站方 429 给的 Retry-After 常常只有 9 秒，原来直接把
+					// 「HTTP 429，请在 9 秒后重试」抛给用户，详情页就变成
+					// 「剧集信息暂时不可用」。冷却期本来就是让我们等的，
+					// 等完再发一次即可，用户不该看到这句。
+					wait := time.Until(backoff.until)
+					if wait > 0 && wait <= 12*time.Second && attempt <= 2 {
+						select {
+						case <-time.After(wait + 200*time.Millisecond):
+							attempt-- // 这次不算一次有效尝试
+							continue
+						case <-ctx.Done():
+							return "", ctx.Err()
+						}
+					}
 					break
 				}
 				continue

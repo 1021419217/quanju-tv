@@ -653,6 +653,8 @@ func (engine *nativeEngine) nativeAuthorCatalog(ctx context.Context, input nativ
 		items, more, err = engine.downloader.fetchP91AuthorPage(ctx, input.AuthorID, result.Page)
 	case sourceJiuse:
 		items, more, err = engine.downloader.fetchJiuseAuthorPage(ctx, input.AuthorID, result.Page)
+	case sourceHsex:
+		items, more, err = engine.downloader.fetchHsexAuthorPage(ctx, input.AuthorID, result.Page)
 	default:
 		return result, errors.New("该站源暂不支持作者主页")
 	}
