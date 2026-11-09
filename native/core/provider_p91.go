@@ -817,6 +817,16 @@ func (d *Downloader) fetchP91Detail(ctx context.Context, sourceID string) (Drama
 	if sourceID == "" || strings.ContainsAny(sourceID, "/?#& ") {
 		return Drama{}, nil, errors.New("91porn 视频 ID 无效")
 	}
+	// 3.33：91porn.com 在真机整域不可达，详情请求会一直挂到前端全局超时
+	// （无限转圈 →「站源响应超时」）。同源 viewkey 的九色可达，详情先借它；
+	// 九色整体不可用时才回退主站，并给主站一个短死线，不再让用户干等。
+	if p91JiuseFallbackEnabled && p91JiuseFirst {
+		if drama, chapters, err := d.p91DetailViaJiuse(ctx, sourceID); err == nil {
+			return drama, chapters, nil
+		}
+	}
+	ctx, cancel := context.WithTimeout(ctx, p91DetailMainBudget)
+	defer cancel()
 	pageURL := d.p91BaseURL(ctx) + "/view_video.php?viewkey=" + url.QueryEscape(sourceID)
 	pageText, err := d.p91Get(ctx, pageURL)
 	if err != nil {

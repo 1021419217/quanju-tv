@@ -286,3 +286,44 @@ func TestParseJiuseCardsSkipsVip(t *testing.T) {
 		t.Fatalf("jiuseFreeOnly 结果不对：%+v", got)
 	}
 }
+
+// 3.33：91 详情借九色之后，剧集与章节身份必须换回 91 源，
+// 且不能把九色的 m3u8 带进章节（否则 resolveP91Media 会当直链起播）。
+func TestP91DetailFromJiuse(t *testing.T) {
+	const viewkey = "dd52a6d867d4f6b7c86d"
+	in := Drama{
+		ID:    providerDramaID(sourceJiuse, viewkey),
+		Source: sourceJiuse,
+		Title:  "测试片",
+	}
+	chapters := []Chapter{{
+		ID:       providerChapterID(sourceJiuse, viewkey, "main"),
+		Source:   sourceJiuse,
+		VideoURL: "https://cdn.example.com/index.m3u8",
+		PageURL:  "https://91porny.com/video/view/" + viewkey,
+	}}
+	got, gotChapters := p91DetailFromJiuse(in, chapters, viewkey)
+	if got.ID != providerDramaID(sourceP91, viewkey) || got.Source != sourceP91 {
+		t.Fatalf("剧集身份没换回 91：%+v", got)
+	}
+	if got.ChannelName != "91porn" || got.SourceID != viewkey {
+		t.Fatalf("频道/源 ID 不对：%+v", got)
+	}
+	if len(gotChapters) != 1 {
+		t.Fatalf("章节数 = %d", len(gotChapters))
+	}
+	chapter := gotChapters[0]
+	if chapter.Source != sourceP91 || chapter.ID != providerChapterID(sourceP91, viewkey, "main") {
+		t.Fatalf("章节身份没换回 91：%+v", chapter)
+	}
+	if chapter.VideoURL != "" {
+		t.Fatalf("不能把九色地址塞进 91 章节：%s", chapter.VideoURL)
+	}
+	if chapter.PageURL != p91SiteURL+"/view_video.php?viewkey="+viewkey {
+		t.Fatalf("PageURL 应指回 91 主站：%s", chapter.PageURL)
+	}
+	_, empty := p91DetailFromJiuse(Drama{}, nil, viewkey)
+	if len(empty) != 1 || empty[0].Source != sourceP91 || empty[0].VideoURL != "" {
+		t.Fatalf("空章节兜底失败：%+v", empty)
+	}
+}

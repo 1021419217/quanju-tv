@@ -159,3 +159,39 @@ func TestHsexAuthorSlugValidation(t *testing.T) {
 		}
 	}
 }
+
+// 3.33：拨号层只把「被污染的页面域名」换成 Cloudflare 边缘 IP，
+// 端口保留、域名不再出现；CDN 与其它站源一个都不能被牵连。
+func TestHsexDialAddresses(t *testing.T) {
+	pinned, ok := hsexDialAddresses("hsex.icu:443")
+	if !ok || len(pinned) != len(hsexEdgeIPs) {
+		t.Fatalf("hsex.icu 应展开成 %d 条边缘线路，实际 %v / %v", len(hsexEdgeIPs), pinned, ok)
+	}
+	for _, address := range pinned {
+		if strings.Contains(address, "hsex.icu") {
+			t.Fatalf("拨号地址里不该再出现被污染的域名：%s", address)
+		}
+		if !strings.HasSuffix(address, ":443") {
+			t.Fatalf("端口应保留：%s", address)
+		}
+	}
+	for _, host := range []string{"www.hsex.icu", "HSEX.ICU", " www.hsex.icu "} {
+		if _, ok := hsexDialAddresses(host + ":443"); !ok {
+			t.Fatalf("%q 也应被改写", host)
+		}
+	}
+	for _, address := range []string{
+		"cdn.hdcdn.store:443", // m3u8 / 分片 CDN，未被污染，不能改写
+		"i.hdcdn.store:443",
+		"91porn.com:443",
+		"91porny.com:443",
+		"not-hsex.icu:443",
+	} {
+		if _, ok := hsexDialAddresses(address); ok {
+			t.Fatalf("%s 不该被改写", address)
+		}
+	}
+	if isHsexPageHost("162.125.80.5") {
+		t.Fatal("污染 IP 不是页面域名")
+	}
+}

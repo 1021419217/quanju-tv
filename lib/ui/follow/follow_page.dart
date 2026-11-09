@@ -8,7 +8,6 @@ import '../app_scope.dart';
 import '../detail/detail_page.dart';
 import '../settings/settings_rows.dart';
 import '../shell/app_shell.dart';
-import '../widgets/bar_button.dart';
 import '../widgets/drama_grid.dart';
 import '../widgets/drama_tile.dart';
 import '../widgets/focus_ring.dart';
@@ -216,14 +215,13 @@ class _FollowPageState extends State<FollowPage> {
     );
   }
 
+  /// 「我的下载」与「编辑」各自是一枚独立的玻璃胶囊（图标 + 文字），
+  /// 不再让圆形图标按钮紧贴着「编辑」两个字。电视端 _textButton 会自动
+  /// 换成实心 TextButton.icon，保持遥控器焦点清晰。
   Widget? _downloadButton() {
     final open = widget.onOpenDownloads;
     if (open == null) return null;
-    return BarButton(
-      icon: Icons.download_rounded,
-      tooltip: '我的下载',
-      onPressed: open,
-    );
+    return _textButton('下载', open, icon: Icons.download_rounded);
   }
 
   Widget _editButtonFor(_View view, {bool icon = true}) => _textButton(
@@ -323,7 +321,8 @@ class _FollowPageState extends State<FollowPage> {
           count: '${view.shown.length}',
           actions: [
             ?_downloadButton(),
-            _editButtonFor(view, icon: false),
+            if (widget.onOpenDownloads != null) const SizedBox(width: 10),
+            _editButtonFor(view),
           ],
         )
       else

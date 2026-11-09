@@ -229,3 +229,65 @@ func (d *Downloader) p91JiuseMedia(ctx context.Context, viewkey string) (provide
 	}
 	return providerMedia{}, fmt.Errorf("九色取流失败：%s", strings.Join(reasons, "；"))
 }
+
+// 3.33：91 详情也借道九色。
+//
+// 真机反馈：点 91 任意片子「正在加载」一直转圈，最后「剧集信息暂不可用，
+// 站源响应超时」——这不是播放失败，是 fetchP91Detail 请求 91porn.com
+// 整域不可达，一直挂到 Dart 层全局超时。取流 3.32 已改为九色优先，但详情
+// 仍走主站，等于每次点开先卡死在主站上。九色与 91 同源、viewkey 一一对应
+// 且在这条链路可达，详情也借它，主站只留作兜底并带死线。
+const (
+	p91JiuseDetailBudget = 8 * time.Second
+	p91DetailMainBudget  = 6 * time.Second
+)
+
+// p91DetailFromJiuse 把九色详情解析结果「换身份」回 91 源。
+// 纯函数，不联网，便于离线锁住 ID / 章节归属不被串成九色。
+func p91DetailFromJiuse(drama Drama, chapters []Chapter, sourceID string) (Drama, []Chapter) {
+	drama.ID = providerDramaID(sourceP91, sourceID)
+	drama.Source = sourceP91
+	drama.SourceID = sourceID
+	drama.ChannelName = "91porn"
+	if strings.TrimSpace(drama.Title) == "" {
+		drama.Title = "91porn " + sourceID
+	}
+	if strings.TrimSpace(drama.Name) == "" {
+		drama.Name = drama.Title
+	}
+	if len(chapters) == 0 {
+		chapters = []Chapter{{}}
+	}
+	chapter := chapters[0]
+	chapter.ID = providerChapterID(sourceP91, sourceID, "main")
+	chapter.Source = sourceP91
+	chapter.Title = "正片"
+	// 不能把九色的 m3u8 塞进 91 章节：resolveP91Media 会把它当成 91 直链
+	// 起播。留空，取流阶段继续按「九色优先」用同一个 viewkey 换 HLS。
+	chapter.VideoURL = ""
+	chapter.PageURL = p91SiteURL + "/view_video.php?viewkey=" + url.QueryEscape(sourceID)
+	chapter.Referer = p91SiteURL + "/"
+	return drama, []Chapter{chapter}
+}
+
+// p91DetailViaJiuse 用同源 viewkey 到九色取详情。
+func (d *Downloader) p91DetailViaJiuse(ctx context.Context, sourceID string) (Drama, []Chapter, error) {
+	sourceID = strings.TrimSpace(sourceID)
+	if !validJiuseID(sourceID) {
+		return Drama{}, nil, errors.New("91 viewkey 无法映射到九色")
+	}
+	d.ensureJiuseBase(ctx)
+	pageURL := jiuseBase() + "/video/view/" + sourceID
+	detailCtx, cancel := context.WithTimeout(ctx, p91JiuseDetailBudget)
+	defer cancel()
+	pageText, err := d.fetchProviderText(detailCtx, pageURL, jiuseBase()+"/")
+	if err != nil {
+		return Drama{}, nil, fmt.Errorf("九色详情请求失败：%v", publicError(err))
+	}
+	drama, chapters, err := parseJiuseDetail(pageText, sourceID)
+	if err != nil {
+		return Drama{}, nil, err
+	}
+	drama, chapters = p91DetailFromJiuse(drama, chapters, sourceID)
+	return drama, chapters, nil
+}

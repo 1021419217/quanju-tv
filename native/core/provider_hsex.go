@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"regexp"
 	"strconv"
@@ -21,6 +22,47 @@ const (
 	hsexBaseURL  = "https://hsex.icu"
 	hsexPageSize = 24
 )
+
+// 好色TV 主域 hsex.icu 在部分网络被 DNS 污染到无关地址：
+//   - 真机：162.125.80.5:443 → connect: connection refused（用户报错原文）
+//   - 沙箱：162.125.34.133 / IPv6 2a03:2880:f111:...:face:b00c（同属 Facebook 段）
+//
+// 2026-11-09 海外机房探针（干净 DNS + 阿里/腾讯/Google/Cloudflare 四家 DoH
+// + curl --resolve 实测）：站方在 Cloudflare 后面，真实边缘 IP 为
+// 104.21.16.218 / 172.67.216.62 / 188.114.96.3 / 188.114.97.3，
+// 用这些 IP 直连（保留原 Host 与 SNI）返回 200，详情页标题与视频 ID 一致。
+//
+// 站方的 m3u8 与分片都在独立 CDN（cdn.hdcdn.store），不受 hsex.icu 污染影响；
+// 所以不用整源换域名，只要让「页面域名」的拨号绕开被污染的系统 DNS。
+// URL、Host、SNI、证书校验全部保持 hsex.icu，站方路由与 TLS 都不变。
+//
+// 这些是 Cloudflare 的 anycast 边缘地址（按 SNI 路由到租户），不是站方专属
+// IP，站方换解析也不会轻易失效；全连不上时 DialContext 会回退系统解析。
+var hsexEdgeIPs = []string{
+	"188.114.96.3",
+	"188.114.97.3",
+	"104.21.16.218",
+	"172.67.216.62",
+}
+
+func isHsexPageHost(host string) bool {
+	host = strings.ToLower(strings.TrimSpace(host))
+	return host == "hsex.icu" || host == "www.hsex.icu"
+}
+
+// hsexDialAddresses 把 hsex.icu:443 展开成一组 CF 边缘 IP 地址。
+// 第二个返回值为 false 表示这个地址与好色TV 页面无关，原样走系统解析。
+func hsexDialAddresses(address string) ([]string, bool) {
+	host, port, err := net.SplitHostPort(address)
+	if err != nil || !isHsexPageHost(host) {
+		return nil, false
+	}
+	out := make([]string, 0, len(hsexEdgeIPs))
+	for _, ip := range hsexEdgeIPs {
+		out = append(out, net.JoinHostPort(ip, port))
+	}
+	return out, true
+}
 
 var hsexCategories = []nativeCategory{
 	{ID: "new", Name: "最新"},

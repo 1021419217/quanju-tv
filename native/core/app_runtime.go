@@ -342,7 +342,20 @@ func newNativeEngine(directory string) (*nativeEngine, error) {
 	// 系统默认双栈拨号会先试 v6，白白等到超时再回落，表现成「打开要转十几秒」。
 	// 这里先拨 tcp4；域名只有 AAAA 时立刻失败并回退原 network，不额外拖时间。
 	baseDialer := &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
+	// 3.33：好色TV 主域 hsex.icu 在部分网络被 DNS 污染到 Facebook 段
+	// （真机 162.125.80.5:443 connection refused）。只把这一个域名的拨号
+	// 固定到 Cloudflare 边缘 IP，URL / Host / SNI / 证书校验都保持 hsex.icu；
+	// m3u8 与分片在独立 CDN（cdn.hdcdn.store），不在此列，其它源完全不受影响。
+	// 边缘 IP 全连不上时回退系统解析，行为与改动前一致，不把源彻底判死。
+	hsexDialer := &net.Dialer{Timeout: 4 * time.Second, KeepAlive: 30 * time.Second}
 	transport.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
+		if pinned, ok := hsexDialAddresses(address); ok {
+			for _, candidate := range pinned {
+				if conn, err := hsexDialer.DialContext(ctx, "tcp4", candidate); err == nil {
+					return conn, nil
+				}
+			}
+		}
 		if conn, err := baseDialer.DialContext(ctx, "tcp4", address); err == nil {
 			return conn, nil
 		}
@@ -650,6 +663,20 @@ func (engine *nativeEngine) nativeAuthorCatalog(ctx context.Context, input nativ
 	var err error
 	switch source {
 	case sourceP91:
+		if p91JiuseFirst {
+			// 3.33：详情借道九色后，本片作者 slug 也是九色的。作者作品同样
+			// 走九色，再把结果换回 91 源身份，避免点进去落到不可达的主站。
+			items, more, err = engine.downloader.fetchJiuseAuthorPage(ctx, input.AuthorID, result.Page)
+			for i := range items {
+				_, id, _ := splitProviderDramaID(items[i].ID)
+				if id != "" {
+					items[i].ID = providerDramaID(sourceP91, id)
+					items[i].Source = sourceP91
+					items[i].ChannelName = "91porn"
+				}
+			}
+			break
+		}
 		items, more, err = engine.downloader.fetchP91AuthorPage(ctx, input.AuthorID, result.Page)
 	case sourceJiuse:
 		items, more, err = engine.downloader.fetchJiuseAuthorPage(ctx, input.AuthorID, result.Page)
